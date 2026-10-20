@@ -1,0 +1,144 @@
+rules_version = '2';
+// =====================================================================
+//  Regras de segurança — Barbearia Rodrigues
+//  Cole este arquivo inteiro em: Firebase → Firestore Database → Regras → Publicar.
+//
+//  ANTES DE PUBLICAR: troque EMAIL_DO_DONO@gmail.com (linha marcada com >>>)
+//  pelo e-mail Google do dono da barbearia. Outras pessoas da equipe podem ser
+//  adicionadas depois pelo app, em Mais → Ajustes → Quem acessa o painel.
+// =====================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- quem é quem ----------
+    function logado() { return request.auth != null; }
+    function verificado() { return logado() && request.auth.token.email_verified == true; }
+    // >>> TROQUE pelo e-mail do dono <<<
+    function donoPrincipal() { return verificado() && request.auth.token.email == "EMAIL_DO_DONO@gmail.com"; }
+    function caminhoAdmins() { return /databases/$(database)/documents/config/admins; }
+    function admin() {
+      return donoPrincipal()
+        || (verificado() && exists(caminhoAdmins()) && request.auth.token.email in get(caminhoAdmins()).data.emails);
+    }
+    function eu(uid) { return logado() && request.auth.uid == uid; }
+    function dono_do_doc() { return logado() && resource.data.uid == request.auth.uid; }
+
+    // ---------- formatos ----------
+    function texto(v, max) { return v is string && v.size() <= max; }
+    function dataISO(v) { return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'); }
+    function hora(v) { return v is string && v.matches('^[0-2][0-9]:[0-5][0-9]$'); }
+    function mudouSo(campos) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(campos); }
+
+    // ---------- dados públicos (qualquer um vê; só o dono altera) ----------
+    match /config/loja { allow read: if true; allow write: if admin(); }
+    match /config/admins { allow read, write: if admin(); }
+    match /servicos/{id} { allow read: if true; allow write: if admin(); }
+    match /profissionais/{id} { allow read: if true; allow write: if admin(); }
+    match /produtos/{id} { allow read: if true; allow write: if admin(); }
+    match /galeria/{id} { allow read: if true; allow write: if admin(); }
+    match /avisos/{id} { allow read: if true; allow write: if admin(); }
+
+    // ---------- só o dono ----------
+    match /estoque/{id} { allow read, write: if admin(); }        // quantidade e custo
+    match /movimentos/{id} { allow read, write: if admin(); }     // entradas e saídas do estoque
+    match /fichas/{id} { allow read, write: if admin(); }         // anotações internas sobre o cliente
+
+    // ---------- cadastro do cliente (nome completo, CPF, nascimento) ----------
+    function clienteValido(d) {
+      return d.keys().hasOnly(['nome', 'cpf', 'nascimento', 'telefone', 'email', 'aceite', 'aceiteEm', 'atualizadoEm', 'criadoEm'])
+        && texto(d.nome, 120) && d.nome.size() >= 5
+        && d.cpf is string && d.cpf.matches('^[0-9]{11}$')
+        && dataISO(d.nascimento)
+        && d.telefone is string && d.telefone.matches('^[0-9]{10,11}$')
+        && texto(d.email, 200)
+        && d.aceite == true;
+    }
+    match /clientes/{uid} {
+      allow read: if eu(uid) || admin();
+      allow create, update: if admin() || (eu(uid) && clienteValido(request.resource.data));
+      allow delete: if eu(uid) || admin();
+    }
+
+    // CPF único: o documento cpfs/{cpf} diz de quem é o CPF. Ninguém lista nem lê o dos outros.
+    match /cpfs/{cpf} {
+      allow get: if admin() || dono_do_doc();
+      allow create: if cpf.matches('^[0-9]{11}$') && request.resource.data.keys().hasOnly(['uid'])
+        && (admin() || (logado() && request.resource.data.uid == request.auth.uid));
+      allow update: if admin() || (dono_do_doc() && request.resource.data.uid == request.auth.uid);
+      allow delete: if admin() || dono_do_doc();
+    }
+
+    // ---------- agendamentos ----------
+    function agValido(d) {
+      return d.keys().hasOnly(['uid', 'clienteNome', 'clienteTelefone', 'servicos', 'duracao', 'total', 'profissional', 'profissionalNome',
+                               'data', 'inicio', 'fim', 'status', 'obs', 'origem', 'criadoEm', 'criadoPor'])
+        && d.uid == request.auth.uid && d.status == 'marcado'
+        && d.servicos is list && d.servicos.size() > 0 && d.servicos.size() <= 10
+        && d.duracao is number && d.duracao > 0 && d.duracao <= 600
+        && d.total is number && dataISO(d.data) && hora(d.inicio)
+        && texto(d.profissional, 60) && texto(d.clienteNome, 120) && texto(d.obs, 300);
+    }
+    match /agendamentos/{id} {
+      allow read: if admin() || dono_do_doc();
+      allow create: if admin() || (logado() && agValido(request.resource.data));
+      // o cliente só pode CANCELAR o próprio horário (marcado ou confirmado)
+      allow update: if admin() || (dono_do_doc()
+        && resource.data.status in ['marcado', 'confirmado']
+        && request.resource.data.status == 'cancelado'
+        && mudouSo(['status', 'atualizadoEm', 'canceladoPor', 'remarcadoPara']));
+      allow delete: if admin();
+    }
+
+    // Blocos de 15 min ocupados: <profissional>_<data>_<HHMM>.
+    // Só podem ser CRIADOS (nunca sobrescritos) — é isso que impede dois clientes no mesmo horário.
+    match /bloqueios/{id} {
+      allow read: if logado();
+      allow create: if id == request.resource.data.profissional + '_' + request.resource.data.data + '_' + request.resource.data.hora
+        && (admin() || (logado()
+          && request.resource.data.keys().hasOnly(['profissional', 'data', 'hora', 'uid', 'ag'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.ag is string
+          && getAfter(/databases/$(database)/documents/agendamentos/$(request.resource.data.ag)).data.uid == request.auth.uid));
+      allow update: if false;
+      allow delete: if admin() || dono_do_doc();
+    }
+
+    // ---------- reservas do Shop ----------
+    match /pedidos/{id} {
+      allow read: if admin() || dono_do_doc();
+      allow create: if logado()
+        && request.resource.data.keys().hasOnly(['uid', 'clienteNome', 'clienteTelefone', 'itens', 'total', 'obs', 'status', 'criadoEm'])
+        && request.resource.data.uid == request.auth.uid && request.resource.data.status == 'novo'
+        && request.resource.data.itens is list && request.resource.data.itens.size() > 0 && request.resource.data.itens.size() <= 30
+        && request.resource.data.total is number && texto(request.resource.data.obs, 200);
+      allow update: if admin() || (dono_do_doc() && resource.data.status == 'novo'
+        && request.resource.data.status == 'cancelado' && mudouSo(['status', 'atualizadoEm']));
+      allow delete: if admin();
+    }
+
+    // ---------- avaliações (públicas; só o primeiro nome) ----------
+    // id da avaliação = id do agendamento: uma avaliação por atendimento concluído
+    match /avaliacoes/{agId} {
+      allow read: if true;
+      allow create: if logado()
+        && request.resource.data.keys().hasOnly(['uid', 'nome', 'nota', 'texto', 'servico', 'profissional', 'profissionalNome', 'ag', 'em'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.nota is int && request.resource.data.nota >= 1 && request.resource.data.nota <= 5
+        && texto(request.resource.data.texto, 400) && texto(request.resource.data.nome, 40)
+        && get(/databases/$(database)/documents/agendamentos/$(agId)).data.uid == request.auth.uid
+        && get(/databases/$(database)/documents/agendamentos/$(agId)).data.status == 'concluido';
+      allow update, delete: if admin() || dono_do_doc();
+    }
+
+    // ---------- notificações de cada cliente ----------
+    match /notificacoes/{uid}/itens/{id} {
+      allow read: if eu(uid) || admin();
+      allow create: if admin();
+      allow update: if admin() || (eu(uid) && mudouSo(['lida']));
+      allow delete: if eu(uid) || admin();
+    }
+
+    // Todo o resto fica bloqueado
+    match /{document=**} { allow read, write: if false; }
+  }
+}
