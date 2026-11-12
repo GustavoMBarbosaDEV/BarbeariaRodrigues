@@ -1,0 +1,79 @@
+name: Firebase Hosting
+
+# Publica o app quando a main recebe um commit que passou em todos os outros checks.
+# Enquanto o secret FIREBASE_SERVICE_ACCOUNT_BARBEARIA_RODRIGUES não existir, o deploy é pulado com um aviso
+# (é o caso até o projeto Firebase da barbearia ser criado: veja DESENVOLVIMENTO.md).
+# PROJETO: troque "barbearia-rodrigues" abaixo se o ID do projeto Firebase ficar diferente.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: read
+
+concurrency:
+  group: firebase-hosting
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      CONTA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BARBEARIA_RODRIGUES }}
+    steps:
+      - name: Conferir credencial
+        id: cred
+        run: |
+          if [ -z "$CONTA" ]; then
+            echo "::notice::Secret FIREBASE_SERVICE_ACCOUNT_BARBEARIA_RODRIGUES ausente: deploy pulado."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Esperar os outros checks deste commit passarem
+        if: steps.cred.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 75); do
+            runs=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --jq '[.check_runs[] | select(.name != "deploy" and .name != "build" and .name != "report-build-status")]')
+            total=$(echo "$runs" | jq 'length')
+            essenciais=$(echo "$runs" | jq '[.[] | select(.name == "gitleaks" or .name == "testes" or (.name | startswith("analisar")))] | length')
+            pendentes=$(echo "$runs" | jq '[.[] | select(.status != "completed")] | length')
+            falhas=$(echo "$runs" | jq -r '.[] | select(.status == "completed" and (.conclusion | IN("success", "skipped", "neutral") | not)) | .name + ": " + .conclusion')
+            if [ -n "$falhas" ]; then echo "::error::Deploy cancelado: algum check falhou."; echo "$falhas"; exit 1; fi
+            if [ "$essenciais" -ge 3 ] && [ "$pendentes" = "0" ]; then echo "Todos os $total checks passaram."; exit 0; fi
+            echo "Aguardando: $pendentes pendente(s), $essenciais essencial(is) encontrado(s)..."; sleep 20
+          done
+          echo "::error::Tempo esgotado esperando os checks."; exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.cred.outputs.ok == 'true'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.cred.outputs.ok == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ferramentas/package-lock.json
+      - name: Montar dist/ (minificado)
+        if: steps.cred.outputs.ok == 'true'
+        working-directory: ferramentas
+        run: |
+          npm ci
+          node build.mjs
+      - name: Não publicar em modo demonstração
+        if: steps.cred.outputs.ok == 'true'
+        run: |
+          if grep -q "COLE_AQUI" dist/firebase-config.js; then echo "::error::firebase-config.js ainda está com COLE_AQUI: o site abriria em modo demonstração."; exit 1; fi
+      - uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0.11.0
+        if: steps.cred.outputs.ok == 'true'
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BARBEARIA_RODRIGUES }}
+          projectId: barbearia-rodrigues
+          channelId: live

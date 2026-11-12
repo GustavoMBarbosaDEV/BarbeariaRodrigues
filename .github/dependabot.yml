@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "Dependências"
+  - package-ecosystem: npm
+    directory: "/testes-regras"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "Dependências"
+  - package-ecosystem: npm
+    directory: "/ferramentas"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "Dependências"
+    ignore:
+      - dependency-name: "firebase"

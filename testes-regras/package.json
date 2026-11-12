@@ -1,0 +1,21 @@
+{
+  "name": "barbearia-rodrigues-testes-regras",
+  "private": true,
+  "description": "Testes das regras do Firestore (firestore.rules) no emulador do Firebase",
+  "type": "module",
+  "scripts": {
+    "test": "firebase emulators:exec --config ../firebase.json --only firestore --project demo-barbearia-rodrigues \"node --test\"",
+    "test:emulador-ligado": "node --test"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "6.0.0",
+    "firebase": "13.1.0",
+    "firebase-tools": "15.34.2"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.6",
+    "uuid": "^11.1.1",
+    "glob": "^14.0.3",
+    "@opentelemetry/core": "^2.8.0"
+  }
+}

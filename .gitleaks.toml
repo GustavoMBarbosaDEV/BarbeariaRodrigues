@@ -1,0 +1,13 @@
+title = "barbearia-rodrigues"
+
+[extend]
+useDefault = true
+
+# A apiKey do Firebase, a chave de site do reCAPTCHA e a chave pública de Web Push vão para o navegador de
+# todo mundo: são públicas por natureza. Quem protege os dados são as regras do Firestore, as restrições da
+# chave no Google Cloud e o App Check.
+# Quando o firebase-config.js for preenchido, acrescente aqui as três chaves (uma expressão por chave).
+# Nunca libere aqui uma chave de verdade (conta de serviço, token, senha).
+[allowlist]
+description = "Chaves públicas do app web: Firebase, reCAPTCHA Enterprise (App Check) e Web Push"
+paths = ['''vendor/firebase-.*''']

@@ -1,0 +1,44 @@
+name: Versão do Firebase
+
+# O SDK do Firebase fica dentro do app (vendor/), então o Dependabot não avisa quando sai versão nova.
+# Este workflow compara com o npm toda semana e abre uma issue.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Comparar com o npm e abrir issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ok() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+          fb_app=$(grep -oE 'const FB_V = "[0-9.]+"' js/dados.js | cut -d'"' -f2)
+          fb_npm=$(npm view firebase version)
+          for v in "$fb_app" "$fb_npm"; do ok "$v" || { echo "::error::versão inesperada: $v"; exit 1; }; done
+          echo "Firebase: app $fb_app, npm $fb_npm"
+          if [ "$fb_app" != "$fb_npm" ]; then
+            titulo="Versão nova do Firebase JS SDK: $fb_npm (o app usa $fb_app)"
+            n=$(gh issue list --state open --limit 100 --json title --jq "[.[] | select(.title == \"$titulo\")] | length")
+            if [ "$n" = "0" ]; then
+              gh issue create --title "$titulo" --body "O npm tem o Firebase JS SDK **$fb_npm** e o app usa **$fb_app** (\`FB_V\` em \`js/dados.js\`).
+
+          Antes de atualizar, leia as notas de mudança: https://firebase.google.com/support/release-notes/js
+
+          Como atualizar: veja \"Bibliotecas dentro do app (vendor/)\" no DESENVOLVIMENTO.md e teste login, agenda, caixa e o app sem internet."
+            else echo "Já existe issue aberta: $titulo"; fi
+          fi

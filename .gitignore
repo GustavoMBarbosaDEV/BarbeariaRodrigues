@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.playwright-mcp/
+.env*
+*serviceAccount*.json
+*-firebase-adminsdk-*.json
+*.keystore
+*.jks
+*.pem
+*.p12
+*.key
+signing*
+firebase-debug.log
+.firebase/
+*.apk
+*.aab
+SEGURANCA-PAINEIS.md

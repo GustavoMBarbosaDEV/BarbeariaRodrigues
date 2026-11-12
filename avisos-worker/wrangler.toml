@@ -1,0 +1,16 @@
+# Serviço de avisos da Barbearia Rodrigues (Cloudflare Workers, plano grátis). Veja LEIAME.md.
+name = "barbearia-rodrigues-avisos"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+# roda sozinho a cada 5 minutos
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+# ID do projeto Firebase da barbearia (o mesmo "projectId" do firebase-config.js)
+PROJETO = "barbearia-rodrigues"
+
+# O segredo CONTA_SERVICO (JSON da conta de serviço) NUNCA entra neste arquivo nem no repositório.
+# Ele é guardado com:  npx wrangler secret put CONTA_SERVICO

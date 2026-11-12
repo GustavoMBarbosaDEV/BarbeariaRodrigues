@@ -1,0 +1,37 @@
+name: Testes do app
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ferramentas/package-lock.json
+      - name: Sintaxe de todos os arquivos do app
+        run: |
+          set -euo pipefail
+          for f in sw.js firebase-config.js $(find js -name '*.js') avisos-worker/src/*.js; do node --check "$f"; done
+      - name: Contas do caixa, comissões, fidelidade, datas dos fechamentos e serviço de avisos
+        run: node --test "testes/*.test.mjs"
+      - name: Montar dist/ (confere versões e a lista do service worker)
+        working-directory: ferramentas
+        run: |
+          npm ci
+          node build.mjs
+      - name: Nenhum arquivo interno dentro de dist/
+        run: |
+          set -euo pipefail
+          if find dist -type f \( -name '*.md' -o -name '*.rules' -o -name 'package*.json' -o -name '*.mjs' -o -name '.env*' -o -name 'firebase.json' \) | grep -q .; then
+            echo "::error::arquivo interno foi parar em dist/"; find dist -type f \( -name '*.md' -o -name '*.rules' -o -name 'package*.json' -o -name '*.mjs' \); exit 1
+          fi
