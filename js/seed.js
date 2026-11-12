@@ -21,7 +21,9 @@ export function catalogo() {
     instagram: "rodriguesbarbearia__",
     intervalo: 30,            // de quantos em quantos minutos começam os horários
     antecedenciaMin: 30,      // minutos mínimos entre agora e o horário marcado
-    cancelarAteHoras: 2,      // até quantas horas antes o cliente pode cancelar sozinho
+    cancelarAteMin: 90,       // até quantos minutos antes o cliente pode cancelar sozinho (1h30)
+    lembreteMin: 120,         // quantos minutos antes o cliente é lembrado do horário (2 h)
+    fidelidade: { ativo: false, cortes: 10, premio: "1 corte grátis" },   // o dono liga e ajusta em Ajustes
     diasAFrente: 30,          // até quantos dias à frente dá para marcar
     horario: {                // 0 = domingo ... 6 = sábado; null = fechado
       0: null,
@@ -63,13 +65,14 @@ export function catalogo() {
     s("Química", "Platinado", 80, 120)
   ].map((x, i) => ({ ...x, ordem: i }));
 
+  // Quem é o dono e a comissão de cada um são definidos pelo dono em Equipe (não ficam aqui).
   const profissionais = [
     { nome: "Arlley", funcao: "Barbeiro", foto: "", servicos: [], horario: null, ativo: true, ordem: 0 },
     { nome: "Miguel", funcao: "Barbeiro", foto: "", servicos: [], horario: null, ativo: true, ordem: 1 }
   ];
 
   // Preços de EXEMPLO: o dono confere e ajusta em Estoque.
-  const p = (categoria, nome, preco, custo, quantidade, minimo, descricao = "") => ({ categoria, nome, preco, custo, quantidade, minimo, descricao });
+  const p = (categoria, nome, preco, custo, quantidade, minimo, descricao = "", foto = "") => ({ categoria, nome, preco, custo, quantidade, minimo, descricao, foto });
   const produtos = [
     p("Cabelo", "Pomada modeladora Caramelo", 35, 18, 12, 4, "Fixação média com efeito natural. Fácil de remodelar ao longo do dia."),
     p("Cabelo", "Gel Boy fixação forte", 25, 12, 15, 5, "Para cabelos rebeldes: fixação forte sem deixar o fio duro."),
@@ -84,6 +87,7 @@ export function catalogo() {
     p("Acessórios", "Pente de bolso", 15, 5, 20, 5, "Para manter o penteado o dia todo.")
   ].map((x, i) => ({ ...x, ordem: i }));
 
+  // Fotos tiradas do Instagram @rodriguesbarbearia__
   const galeria = [
     ["cortes/degrade-social.jpg", "Degradê social"],
     ["cortes/low-fade.jpg", "Low fade"],
@@ -113,13 +117,19 @@ export function dadosIniciais() {
   const put = (col, id, d) => ((c[col] ||= {})[id] = d);
   put("config", "loja", cat.loja);
   put("config", "admins", { emails: ["dono@demo"] });
+  c.config.loja.fidelidade = { ativo: true, cortes: 5, premio: "1 corte grátis" };
+  // ---- equipe de EXEMPLO: na demonstração o primeiro da equipe entra como dono e o segundo como barbeiro contratado (40%) ----
+  put("equipe", "p0", { email: "dono@demo", comissao: 0 });
+  put("equipe", "p1", { email: "barbeiro@demo", comissao: 40 });
+  put("acessos", "barbeiro@demo", { prof: "p1", perm: { clientes: true, caixa: true } });
   cat.servicos.forEach((s, i) => put("servicos", "s" + i, s));
   cat.profissionais.forEach((p, i) => put("profissionais", "p" + i, p));
+  const nomeProf = i => c.profissionais["p" + i].nome;
   cat.galeria.forEach((g, i) => put("galeria", "g" + i, g));
   cat.avisos.forEach((a, i) => put("avisos", "a" + i, a));
   cat.produtos.forEach((p, i) => {
     const { custo, quantidade, minimo, ...pub } = p;
-    put("produtos", "pr" + i, { ...pub, foto: "", ativo: true, disponivel: quantidade > 0 });
+    put("produtos", "pr" + i, { ...pub, foto: pub.foto || "", ativo: true, disponivel: quantidade > 0 });
     put("estoque", "pr" + i, { custo, quantidade, minimo, atualizadoEm: Date.now() });
   });
 
@@ -137,13 +147,16 @@ export function dadosIniciais() {
   // ---- horários de EXEMPLO ----
   let d = hoje();
   while (!cat.loja.horario[diaSemana(d)]) d = somaDias(d, 1);
+  const fimDe = (ini, dur) => { const [h, m] = ini.split(":").map(Number), t = h * 60 + m + dur; return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0"); };
   const ag = (id, uidC, nome, sv, prof, data, inicio, status, extra = {}) => {
     const s = cat.servicos[sv];
     put("agendamentos", id, {
       uid: uidC, clienteNome: nome, servicos: [{ id: "s" + sv, nome: s.nome, preco: s.preco, duracao: s.duracao }],
-      total: s.preco, duracao: s.duracao, profissional: "p" + prof, profissionalNome: cat.profissionais[prof].nome,
-      data, inicio, status, obs: "", criadoEm: Date.now() - 3600000, ...extra
+      total: s.preco, duracao: s.duracao, profissional: "p" + prof, profissionalNome: nomeProf(prof),
+      data, inicio, fim: fimDe(inicio, s.duracao), status, obs: "", criadoEm: Date.now() - 3600000,
+      ...(status === "concluido" ? { pagamento: { forma: extra.forma || "pix", valor: s.preco, recebido: s.preco, troco: 0, gorjeta: 0 } } : {}), ...extra
     });
+    if (status === "concluido") put("comissoes", id, { profissional: "p" + prof, data, base: s.preco, pct: prof ? 40 : 0, valor: prof ? Math.round(s.preco * 40) / 100 : 0, em: Date.now() });
     const [h, m] = inicio.split(":").map(Number);
     for (let t = h * 60 + m; t < h * 60 + m + s.duracao; t += 15) {
       if (status === "cancelado") break;
@@ -152,11 +165,19 @@ export function dadosIniciais() {
     }
   };
   ag("ag1", "ex1", "João Exemplo da Silva", 0, 0, d, "09:00", "confirmado");
-  ag("ag2", "ex2", "Pedro Teste Oliveira", 13, 1, d, "10:00", "marcado");
-  ag("ag3", "ex3", "Lucas Modelo Souza", 8, 0, d, "15:00", "marcado");
-  ag("ag4", "ex1", "João Exemplo da Silva", 0, 1, somaDias(hoje(), -20), "16:00", "concluido");
-  ag("ag5", "ex2", "Pedro Teste Oliveira", 17, 0, somaDias(hoje(), -6), "11:00", "concluido");
+  ag("ag2", "ex2", "Pedro Teste Oliveira", 10, 0, d, "10:00", "marcado");
+  ag("ag3", "ex3", "Lucas Modelo Souza", 7, 0, d, "15:00", "marcado");
+  ag("ag4", "ex1", "João Exemplo da Silva", 0, 0, somaDias(hoje(), -20), "16:00", "concluido");
+  ag("ag5", "ex2", "Pedro Teste Oliveira", 12, 0, somaDias(hoje(), -6), "11:00", "concluido");
   ag("ag6", "demo-cliente", "", 0, 0, somaDias(hoje(), -12), "14:00", "concluido");
+  ag("ag7", "demo-cliente", "", 1, 0, somaDias(hoje(), -40), "10:00", "concluido", { forma: "dinheiro" });
+  ag("ag8", "demo-cliente", "", 0, 1, somaDias(hoje(), -26), "11:00", "concluido", { forma: "credito" });
+  ag("ag9", "ex3", "Lucas Modelo Souza", 1, 1, d, "11:00", "confirmado");
+  ag("ag10", "ex2", "Pedro Teste Oliveira", 7, 1, somaDias(hoje(), -6), "16:00", "concluido", { forma: "debito" });
+  // lista de espera de EXEMPLO: o Lucas quer o horário das 09:00, que está com o João
+  put("espera", "ex3_" + d + "_0900", { uid: "ex3", clienteNome: "Lucas Modelo Souza", clienteTelefone: "31999990003", data: d, hora: "09:00", profissional: "", servicos: ["s0"], duracao: 30, push: false, criadoEm: Date.now() - 1800000 });
+  // caixa de EXEMPLO
+  put("caixa", "cx1", { tipo: "saida", valor: 25, descricao: "Lâminas e toalhas", forma: "dinheiro", data: somaDias(hoje(), -6), em: Date.now() - 86400000 * 6, por: "demo-dono", porNome: "Dono (demonstração)", profissional: "" });
   put("pedidos", "pd1", { uid: "ex3", clienteNome: "Lucas Modelo Souza", itens: [{ id: "pr0", nome: "Pomada modeladora Caramelo", preco: 35, qtd: 1 }], total: 35, status: "novo", criadoEm: Date.now() - 7200000 });
   return c;
 }

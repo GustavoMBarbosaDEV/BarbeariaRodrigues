@@ -9,7 +9,7 @@ export function tela(el) {
     const cats = categorias(S.servicos);
     el.innerHTML = `<a class="voltar" href="#/dono/mais">${icone("voltar")} Mais</a>` + titulo("Serviços", `${S.servicos.filter(s => s.ativo !== false).length} ativos · aparecem no app na ordem abaixo`, `<button class="btn mini" id="novo">${icone("mais")} Serviço</button>`) +
       (cats.length ? cats.map(([c, l]) => `<h2 class="periodo">${esc(c)}</h2><div class="lista">${l.map(s => `<div class="item">
-        <div class="meio"><strong>${esc(s.nome)} ${s.destaque ? '<span class="pill ouro">destaque</span>' : ""} ${s.ativo === false ? '<span class="pill">pausado</span>' : ""}</strong><small>${duracao(s.duracao)}${s.descricao ? " · " + esc(s.descricao) : ""}</small></div>
+        <div class="meio"><strong>${esc(s.nome)} ${s.destaque ? '<span class="pill destaque">destaque</span>' : ""} ${s.ativo === false ? '<span class="pill">pausado</span>' : ""}</strong><small>${duracao(s.duracao)}${s.descricao ? " · " + esc(s.descricao) : ""}</small></div>
         <div class="lado"><span class="preco">${precoServ(s)}</span><div style="display:flex;gap:4px">
           <button class="icone-btn" data-sobe="${esc(s.id)}" aria-label="Subir">${icone("subir")}</button>
           <button class="icone-btn" data-ed="${esc(s.id)}" aria-label="Editar">${icone("lapis")}</button></div></div>

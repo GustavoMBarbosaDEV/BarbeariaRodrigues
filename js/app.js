@@ -8,19 +8,20 @@ import { S } from "./estado.js";
 import { $, esc, icone, toast, ls } from "./util.js";
 import { N } from "./notificacoes.js";
 
-export const VERSAO = "1.0.0";
+export const VERSAO = "2.0.0";
 
 // ---------- Tema ----------
-export function aplicaTema(t = ls.get("br.tema", "escuro")) {
+export function aplicaTema(t = ls.get("bc.tema", "escuro")) {
   const escuro = t === "escuro" || (t === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = escuro ? "dark" : "light";
   $('meta[name="theme-color"]')?.setAttribute("content", escuro ? "#0d0b09" : "#f6f1ea");
 }
-export function trocaTema(t) { ls.set("br.tema", t); aplicaTema(t); }
+export function trocaTema(t) { ls.set("bc.tema", t); aplicaTema(t); }
 aplicaTema();
 
 // ---------- Rotas ----------
-// login: precisa estar logado | perfil: precisa ter o cadastro completo | dono: só o dono
+// login: precisa estar logado | perfil: precisa ter o cadastro completo
+// equipe: dono ou barbeiro | perm: dono, ou barbeiro com aquela permissão liberada | dono: só o dono
 const ROTAS = {
   "inicio": { m: "./cliente/inicio.js" },
   "servicos": { m: "./cliente/servicos.js" },
@@ -33,30 +34,36 @@ const ROTAS = {
   "perfil": { m: "./cliente/perfil.js", login: true },
   "notificacoes": { m: "./cliente/notificacoes.js", login: true },
   "privacidade": { m: "./cliente/privacidade.js" },
-  "dono/agenda": { m: "./dono/agenda.js", dono: true },
-  "dono/clientes": { m: "./dono/clientes.js", dono: true },
-  "dono/cliente": { m: "./dono/cliente.js", dono: true },
-  "dono/estoque": { m: "./dono/estoque.js", dono: true },
-  "dono/pedidos": { m: "./dono/pedidos.js", dono: true },
+  "dono/agenda": { m: "./dono/agenda.js", equipe: true },
+  "dono/clientes": { m: "./dono/clientes.js", perm: "clientes" },
+  "dono/cliente": { m: "./dono/cliente.js", perm: "clientes" },
+  "dono/caixa": { m: "./dono/caixa.js", perm: "caixa" },
+  "dono/estoque": { m: "./dono/estoque.js", perm: "estoque" },
+  "dono/pedidos": { m: "./dono/pedidos.js", perm: "pedidos" },
+  "dono/relatorios": { m: "./dono/relatorios.js", perm: "relatorios" },
   "dono/servicos": { m: "./dono/servicos.js", dono: true },
   "dono/equipe": { m: "./dono/equipe.js", dono: true },
-  "dono/relatorios": { m: "./dono/relatorios.js", dono: true },
   "dono/avisos": { m: "./dono/avisos.js", dono: true },
   "dono/galeria": { m: "./dono/galeria.js", dono: true },
   "dono/ajustes": { m: "./dono/ajustes.js", dono: true },
-  "dono/mais": { m: "./dono/mais.js", dono: true }
+  "dono/mais": { m: "./dono/mais.js", equipe: true }
 };
+const restrita = def => def.equipe || def.perm || def.dono;
+const liberada = def => def.dono ? D.ehDono : def.perm ? D.pode(def.perm) : def.equipe ? D.ehEquipe : true;
 
 const ABAS_CLIENTE = [
   ["inicio", "casa", "Início"], ["agendar", "calendario", "Agendar"], ["horarios", "relogio", "Horários"],
   ["shop", "sacola", "Shop"], ["perfil", "usuario", "Perfil"]
 ];
-const ABAS_DONO = [
-  ["dono/agenda", "calendario", "Agenda"], ["dono/clientes", "usuarios", "Clientes"], ["dono/estoque", "caixa", "Estoque"],
+// O painel mostra só as abas que aquela conta pode abrir (o dono vê todas).
+const ABAS_EQUIPE = [
+  ["dono/agenda", "calendario", "Agenda"], ["dono/clientes", "usuarios", "Clientes"], ["dono/caixa", "dinheiro", "Caixa"],
   ["dono/pedidos", "sacola", "Pedidos"], ["dono/mais", "menu", "Mais"]
 ];
+const abasEquipe = () => ABAS_EQUIPE.filter(([r]) => liberada(ROTAS[r]));
+const NO_MAIS = ["dono/servicos", "dono/equipe", "dono/relatorios", "dono/avisos", "dono/galeria", "dono/ajustes", "dono/estoque"];
 
-let visao = ls.get("br.visao", "dono");   // o dono pode alternar entre o painel e o app do cliente
+let visao = ls.get("bc.visao", "dono");   // o dono pode alternar entre o painel e o app do cliente
 let limpaTela = null;
 let rotaAtual = "";
 let navId = 0;           // cada navegação ganha um número; uma tela antiga que termina de carregar depois é descartada
@@ -71,19 +78,19 @@ export function lerRota() {
 }
 export const ir = (r) => { location.hash = "#/" + r; };
 
-function rotaPadrao() { return D.ehDono && visao === "dono" ? "dono/agenda" : "inicio"; }
+function rotaPadrao() { return D.ehEquipe && visao === "dono" ? "dono/agenda" : "inicio"; }
 
 async function navega() {
   const meu = ++navId;
   const r = lerRota();
   if (!r.nome || !ROTAS[r.nome]) return ir(rotaPadrao());
   const def = ROTAS[r.nome];
-  if ((def.login || def.dono) && !D.usuario) return ir("entrar?volta=" + encodeURIComponent(location.hash.slice(2)));
-  if (def.dono && !D.ehDono) return ir("inicio");
-  if (def.perfil && !D.ehDono && S.perfilCarregado && !S.perfilCompleto()) return ir("perfil?completar=1&volta=" + encodeURIComponent(location.hash.slice(2)));
-  if (def.perfil && !D.ehDono && !S.perfilCarregado) { await esperaPerfil(); if (meu !== navId) return; if (!S.perfilCompleto()) return ir("perfil?completar=1&volta=" + encodeURIComponent(location.hash.slice(2))); }
-  if (r.nome.startsWith("dono/")) { visao = "dono"; ls.set("br.visao", visao); }
-  else if (D.ehDono && r.nome !== "notificacoes") { visao = "app"; ls.set("br.visao", visao); }
+  if ((def.login || restrita(def)) && !D.usuario) return ir("entrar?volta=" + encodeURIComponent(location.hash.slice(2)));
+  if (!liberada(def)) return ir(D.ehEquipe ? "dono/agenda" : "inicio");   // a tela some para quem não pode; quem protege os dados são as regras do banco
+  if (def.perfil && !D.ehEquipe && S.perfilCarregado && !S.perfilCompleto()) return ir("perfil?completar=1&volta=" + encodeURIComponent(location.hash.slice(2)));
+  if (def.perfil && !D.ehEquipe && !S.perfilCarregado) { await esperaPerfil(); if (meu !== navId) return; if (!S.perfilCompleto()) return ir("perfil?completar=1&volta=" + encodeURIComponent(location.hash.slice(2))); }
+  if (r.nome.startsWith("dono/")) { visao = "dono"; ls.set("bc.visao", visao); }
+  else if (D.ehEquipe && r.nome !== "notificacoes") { visao = "app"; ls.set("bc.visao", visao); }
 
   document.querySelectorAll(".modal-fundo, .lightbox").forEach(x => x.remove());   // não deixa janela aberta ao trocar de tela
   try { limpaTela?.(); } catch (e) { console.error(e); }
@@ -104,7 +111,8 @@ async function navega() {
     el.focus({ preventScroll: true });
   } catch (e) {
     console.error(e);
-    el.innerHTML = `<div class="vazio">${icone("alerta")}<strong>Não foi possível abrir esta tela.</strong><p>${esc(traduzErro(e))}</p><button class="btn" onclick="location.reload()">Recarregar</button></div>`;
+    el.innerHTML = `<div class="vazio">${icone("alerta")}<strong>Não foi possível abrir esta tela.</strong><p>${esc(traduzErro(e))}</p><button class="btn" data-recarregar>Recarregar</button></div>`;
+    el.querySelector("[data-recarregar]").addEventListener("click", () => location.reload());
   }
 }
 function esperaPerfil() {
@@ -114,7 +122,8 @@ function esperaPerfil() {
 // ---------- Moldura: topo + abas ----------
 function montaMoldura(def) {
   const app = $("#app");
-  const abas = D.ehDono && visao === "dono" ? ABAS_DONO : ABAS_CLIENTE;
+  const painel = D.ehEquipe && visao === "dono";
+  const abas = painel ? abasEquipe() : ABAS_CLIENTE;
   if (!$("#tela")) {
     app.innerHTML = `
       <a class="pular" href="#tela">Pular para o conteúdo</a>
@@ -128,14 +137,14 @@ function montaMoldura(def) {
       </header>
       <nav class="abas" id="abas" aria-label="Menu principal"></nav>
       <main class="tela" id="tela" tabindex="-1"></main>`;
-    $("#btnVisao").addEventListener("click", () => { visao = visao === "dono" ? "app" : "dono"; ls.set("br.visao", visao); ir(visao === "dono" ? "dono/agenda" : "inicio"); });
+    $("#btnVisao").addEventListener("click", () => { visao = visao === "dono" ? "app" : "dono"; ls.set("bc.visao", visao); ir(visao === "dono" ? "dono/agenda" : "inicio"); });
   }
   document.body.classList.toggle("sem-abas", !!def.semAbas);
-  document.body.classList.toggle("modo-dono", D.ehDono && visao === "dono");
-  $("#abas").innerHTML = abas.map(([r, ic, t]) => `<a href="#/${r}" class="${rotaAtual === r || (r === "dono/mais" && ["dono/servicos", "dono/equipe", "dono/relatorios", "dono/avisos", "dono/galeria", "dono/ajustes"].includes(rotaAtual)) || (r === "dono/clientes" && rotaAtual === "dono/cliente") || (r === "shop" && rotaAtual === "carrinho") ? "ativo" : ""}" ${rotaAtual === r ? 'aria-current="page"' : ""}>${icone(ic)}<span>${t}</span>${r === "dono/pedidos" || r === "shop" ? '<i class="badge" hidden></i>' : ""}</a>`).join("");
-  $("#subtitulo").textContent = D.ehDono && visao === "dono" ? "Painel do dono" : (D.modo === "demo" ? "Demonstração" : "Teixeiras · MG");
+  document.body.classList.toggle("modo-dono", painel);
+  $("#abas").innerHTML = abas.map(([r, ic, t]) => `<a href="#/${r}" class="${rotaAtual === r || (r === "dono/mais" && NO_MAIS.includes(rotaAtual)) || (r === "dono/clientes" && rotaAtual === "dono/cliente") || (r === "shop" && rotaAtual === "carrinho") ? "ativo" : ""}" ${rotaAtual === r ? 'aria-current="page"' : ""}>${icone(ic)}<span>${t}</span>${r === "dono/pedidos" || r === "shop" ? '<i class="badge" hidden></i>' : ""}</a>`).join("");
+  $("#subtitulo").textContent = painel ? (D.ehDono ? "Painel do dono" : "Painel do barbeiro") : (D.modo === "demo" ? "Demonstração" : "Teixeiras, MG");
   const bv = $("#btnVisao");
-  bv.hidden = !D.ehDono;
+  bv.hidden = !D.ehEquipe;
   bv.innerHTML = visao === "dono" ? `${icone("olho")}<span>Ver app</span>` : `${icone("grafico")}<span>Painel</span>`;
   $("#btnSino").hidden = !D.usuario;
   $("#btnEntrar").hidden = !!D.usuario || def.semAbas;
@@ -146,7 +155,7 @@ function montaMoldura(def) {
 async function inicia() {
   await D.iniciar();
   S.iniciarPublico();
-  S.carrinho = ls.get("br.carrinho", []);
+  S.carrinho = ls.get("bc.carrinho", []);
   let primeiro = true;
   D.aoMudarUsuario(u => {
     S.iniciarUsuario(u);
@@ -154,7 +163,7 @@ async function inicia() {
     if (!primeiro) {
       const volta = lerRota().q.get("volta");
       const antes = location.hash;
-      if (u) ir(volta || (D.ehDono ? (visao = "dono", "dono/agenda") : "inicio"));
+      if (u) ir(volta || (D.ehEquipe ? (visao = "dono", "dono/agenda") : "inicio"));
       else { ir("inicio"); }
       if (location.hash === antes) navega();   // mesmo endereço: o hashchange não dispara sozinho
     }
@@ -164,12 +173,45 @@ async function inicia() {
   primeiro = false;
   window.addEventListener("hashchange", navega);
   await navega();
-  const b = document.getElementById("boot");
-  if (b) { b.classList.add("sai"); setTimeout(() => b.remove(), 400); }
-  if (D.modo === "demo" && !ls.get("br.avisoDemo")) {
-    ls.set("br.avisoDemo", 1);
+  if (typeof window.encerrarAbertura === "function") window.encerrarAbertura();
+  else { const b = document.getElementById("boot"); if (b) { b.classList.add("sai"); setTimeout(() => b.remove(), 400); } }
+  if (D.modo === "demo" && !ls.get("bc.avisoDemo")) {
+    ls.set("bc.avisoDemo", 1);
     toast("Modo demonstração: os dados ficam só neste aparelho.");
   }
+  vigiaAtualizacao();
+}
+
+// ---------- Aviso de nova versão ----------
+// O service worker novo fica esperando; o app mostra um cartão e só troca quando a pessoa tocar em "Atualizar"
+// (trocar sozinho no meio do uso poderia perder o que ela estava fazendo).
+async function vigiaAtualizacao() {
+  if (!("serviceWorker" in navigator)) return;
+  const reg = await navigator.serviceWorker.getRegistration().catch(() => null);
+  if (!reg) return;
+  let dispensado = 0;
+  const mostra = async w => {
+    if (!w || !navigator.serviceWorker.controller || $("#novaVersao") || Date.now() - dispensado < 30 * 60000) return;
+    let versao = "";
+    try { versao = (/const V = "([0-9.]+)"/.exec(await (await fetch(w.scriptURL, { cache: "no-store" })).text()) || [])[1] || ""; } catch (e) { }
+    const el = document.createElement("div");
+    el.id = "novaVersao"; el.className = "nova-versao"; el.setAttribute("role", "alertdialog"); el.setAttribute("aria-label", "Nova versão disponível");
+    el.innerHTML = `<img src="icons/icon-192.png" alt="" width="40" height="40"><div class="meio"><strong>Nova versão pronta</strong><small></small></div><button class="btn mini sec" data-depois>Depois</button><button class="btn mini" data-ok>Atualizar</button>`;
+    el.querySelector("small").textContent = versao ? "Versão " + versao : "Toque para atualizar o app";
+    el.querySelector("[data-depois]").addEventListener("click", () => { dispensado = Date.now(); el.remove(); });
+    el.querySelector("[data-ok]").addEventListener("click", e => {
+      e.currentTarget.disabled = true; e.currentTarget.textContent = "Atualizando…";
+      w.postMessage({ tipo: "atualizar" });
+      setTimeout(() => location.reload(), 5000);   // se nada acontecer, recarrega mesmo assim
+    });
+    document.body.appendChild(el);
+  };
+  const confere = () => { if (reg.waiting) mostra(reg.waiting); };
+  reg.addEventListener("updatefound", () => { const n = reg.installing; n && n.addEventListener("statechange", () => { if (n.state === "installed") confere(); }); });
+  let recarregou = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (!recarregou && $("#novaVersao")) { recarregou = true; location.reload(); } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().then(confere).catch(() => { }); });
+  confere();
 }
 
 window.addEventListener("error", e => console.error(e.error || e.message));

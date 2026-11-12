@@ -2,13 +2,14 @@
 import { D } from "../dados.js";
 import { S } from "../estado.js";
 import { esc, icone, estrelas, avatar, linkWhats, hoje, quando, tempoAtras, primeiroNome } from "../util.js";
-import { cartaoServico, situacaoAgora, tabelaHorario, enderecoLink, fotoProduto, lightbox } from "../ui.js";
+import { cartaoServico, situacaoAgora, tabelaHorario, enderecoLink, fotoProduto, lightbox, cartaoFidelidade } from "../ui.js";
+import { fidelidade } from "../caixa.js";
 import { ATIVOS } from "../agenda.js";
 import { reais } from "../util.js";
 
 export function tela(el) {
   let avaliacoes = [];
-  let proximo = null;
+  let proximo = null, meus = null;
   const paradas = [];
 
   const desenha = () => {
@@ -22,27 +23,35 @@ export function tela(el) {
     const prods = S.produtos.filter(p => p.ativo !== false).slice(0, 4);
 
     el.innerHTML = `
-    <section class="hero">
-      <img src="img/casa/equipe.jpg" alt="Equipe da Barbearia Rodrigues">
+    <section class="hero hero-casa">
+      <img class="hero-foto" src="img/casa/equipe.jpg" alt="Equipe da Barbearia Rodrigues">
+      <div class="hero-aurora" aria-hidden="true"></div>
+      <div class="hero-orbita" aria-hidden="true">
+        <div class="hero-selo"><img src="img/logo-320.png" alt="" width="320" height="320"></div>
+        <span class="hero-selo-legenda">TEIXEIRAS<br><b>MG</b></span>
+      </div>
       <div class="hero-txt">
-        <img class="logo-g" src="img/logo-320.png" alt="" width="76" height="76">
-        <h1>${esc(loja.nome || "Barbearia Rodrigues")}</h1>
-        <p>${esc(loja.slogan || "")}</p>
+        <div class="hero-kicker"><span></span> BARBEARIA RODRIGUES <i>•</i> TEIXEIRAS, MG</div>
+        <h1>Sua história.<br><em>No seu tempo.</em></h1>
+        <p>${esc(loja.slogan || "A barbearia que valoriza sua história.")}</p>
         <div class="hero-info">
           <span class="aberto-agora ${sit.aberto ? "" : "fechado"}">${esc(sit.texto)}</span>
           ${avaliacoes.length ? `<span>${estrelas(media)} <b>${media.toFixed(1).replace(".", ",")}</b> (${avaliacoes.length})</span>` : ""}
           ${loja.cidade ? `<span>${icone("local")}${esc(loja.cidade.split(",")[0])}</span>` : ""}
         </div>
-        <div class="botoes">
-          <a class="btn" href="#/agendar">${icone("calendario")} Agendar horário</a>
+        <div class="botoes hero-acoes">
+          <a class="btn hero-cta" href="#/agendar">${icone("calendario")} Reservar meu horário <span aria-hidden="true">↗</span></a>
           ${loja.whatsapp ? `<a class="btn sec" href="${linkWhats(loja.whatsapp, "Olá! Vim pelo app da Barbearia Rodrigues.")}" target="_blank" rel="noopener">${icone("whats")} WhatsApp</a>` : ""}
         </div>
+        <div class="hero-assinatura"><span class="hero-assinatura-linha"></span><span>CORTE · BARBA · QUÍMICA</span><span class="hero-assinatura-linha"></span></div>
       </div>
     </section>
 
     ${nome ? `<p class="muted" style="margin-top:18px">Olá, <b style="color:var(--txt)">${esc(nome)}</b>! Bom te ver por aqui.</p>` : ""}
 
     ${proximo ? `<div class="secao" style="margin-top:16px"><a class="faixa" href="#/horarios">${icone("calendario")}<div><strong>Seu próximo horário: ${esc(quando(proximo.data))} às ${proximo.inicio}</strong><p>${esc((proximo.servicos || []).map(s => s.nome).join(" + "))} com ${esc(proximo.profissionalNome || "a equipe")}</p></div></a></div>` : ""}
+
+    ${meus && D.usuario && !D.ehEquipe ? `<div style="margin-top:16px">${cartaoFidelidade(fidelidade(loja, meus))}</div>` : ""}
 
     ${aviso ? `<div class="secao" style="margin-top:16px"><div class="faixa">${icone("megafone")}<div><strong>${esc(aviso.titulo)}</strong><p>${esc(aviso.texto)}</p></div></div></div>` : ""}
 
@@ -96,6 +105,7 @@ export function tela(el) {
   paradas.push(S.ao(q => { if (["loja", "servicos", "profissionais", "galeria", "avisos", "produtos", "perfil"].includes(q)) desenha(); }));
   paradas.push(D.ouvir("avaliacoes", [], l => { avaliacoes = l.filter(a => a.publica !== false).sort((a, b) => b.em - a.em); desenha(); }));
   if (D.usuario) paradas.push(D.ouvir("agendamentos", [["uid", "==", D.usuario.uid]], l => {
+    meus = l;
     proximo = l.filter(a => ATIVOS.includes(a.status) && a.data >= hoje()).sort((a, b) => (a.data + a.inicio).localeCompare(b.data + b.inicio))[0] || null;
     desenha();
   }));

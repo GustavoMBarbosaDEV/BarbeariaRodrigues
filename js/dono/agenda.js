@@ -1,26 +1,40 @@
 // =====================================================================
-//  Agenda do dono: dia a dia por profissional, confirmar/concluir/faltou,
-//  encaixar cliente, bloquear horário e lista do que aguarda confirmação.
+//  Agenda da equipe: dia a dia por profissional, confirmar/concluir (com a forma
+//  de pagamento)/faltou, encaixar cliente, bloquear horário, lista do que aguarda
+//  confirmação e lista de espera (avisar quem queria um horário que vagou).
+//  O barbeiro vê a agenda do dia inteira, mas só mexe nos próprios horários
+//  (a não ser que o dono libere "mexer na agenda dos colegas").
 // =====================================================================
 import { D, traduzErro } from "../dados.js";
 import { S } from "../estado.js";
 import { esc, icone, reais, toast, abreModal, confirma, hoje, somaDias, dataLonga, quando, min, hhmm, avatar, linkWhats, foneFormata, normaliza, soDigitos, cpfOculto, duracao, cpfFormata, cpfValido } from "../util.js";
-import { STATUS, ATIVOS, liberar, reservar, livres, ocupadosDoDia, bloquearPeriodo, desbloquear, profsAtivos, expediente } from "../agenda.js";
+import { STATUS, ATIVOS, liberar, reservar, livres, ocupadosDoDia, bloquearPeriodo, desbloquear, profsAtivos, expediente, interessadosNaVaga, vagaAberta, conjunto, dataHora } from "../agenda.js";
 import { N } from "../notificacoes.js";
 import { precoServ, categorias } from "../ui.js";
+import { comissaoSobre, fidelidade, nomeForma, valorPago } from "../caixa.js";
+import { pedePagamento } from "./pagamento.js";
+import { ir } from "../app.js";
 
 export function tela(el, rota) {
   let dia = rota.q.get("data") || hoje();
-  let filtroProf = "";
-  let ags = [], bloqs = [], pendentes = [];
+  let abrirVaga = rota.q.get("vaga") || "";       // veio do aviso "fulano cancelou": abre a lista de espera daquele horário
+  const todos = D.pode("agendaTodos");
+  const podeMexer = a => todos || !D.profId || a.profissional === D.profId;
+  const meusProfs = () => profsAtivos().filter(p => todos || !D.profId || p.id === D.profId);
+  let filtroProf = todos ? "" : D.profId;
+  let ags = [], bloqs = [], bloqsTodos = [], espera = [], pendentes = [];
   let paradasDia = [];
   const paradas = [];
 
   function ouveDia() {
     paradasDia.forEach(f => f());
     paradasDia = [
-      D.ouvir("agendamentos", [["data", "==", dia]], l => { ags = l; desenha(); }),
-      D.ouvir("bloqueios", [["data", "==", dia]], l => { bloqs = l.filter(b => !b.ag); desenha(); })
+      D.ouvir("agendamentos", [["data", "==", dia]], l => {
+        ags = l; desenha();
+        if (abrirVaga) { const a = ags.find(x => x.id === abrirVaga); abrirVaga = ""; if (a) vaga(a); }
+      }),
+      D.ouvir("bloqueios", [["data", "==", dia]], l => { bloqsTodos = l; bloqs = l.filter(b => !b.ag); desenha(); }),
+      D.ouvir("espera", [["data", "==", dia]], l => { espera = l; desenha(); }, () => { })
     ];
   }
 
@@ -45,7 +59,7 @@ export function tela(el, rota) {
       ...lista.map(a => ({ t: min(a.inicio), html: `<button class="ag ${a.status}" data-ag="${a.id}">
         <span class="hora"><b>${a.inicio}</b><small>${a.fim || ""}</small></span>
         <span class="meio"><strong>${esc(a.clienteNome || "Cliente")}</strong><small>${esc((a.servicos || []).map(s => s.nome).join(" + "))} · ${reais(a.total)}</small>
-        <small><span class="pill ${STATUS[a.status]?.c || ""}">${STATUS[a.status]?.t || a.status}</span>${a.obs ? ` “${esc(a.obs)}”` : ""}</small></span></button>` })),
+        <small><span class="pill ${STATUS[a.status]?.c || ""}">${STATUS[a.status]?.t || a.status}</span>${a.status === "concluido" && a.pagamento ? ` ${esc(nomeForma(a.pagamento.forma))}` : ""}${a.obs ? ` “${esc(a.obs)}”` : ""}</small></span></button>` })),
       ...bl.map(b => ({ t: b.ini, html: `<button class="ag bloq" data-bl="${p.id}|${b.ini}"><span class="hora"><b>${hhmm(b.ini)}</b><small>${hhmm(b.fim)}</small></span><span class="meio"><strong>${esc(b.motivo)}</strong><small>Toque para liberar</small></span></button>` }))
     ].sort((a, b) => a.t - b.t);
     const ativosCount = lista.filter(a => ATIVOS.includes(a.status) || a.status === "concluido").length;
@@ -61,13 +75,18 @@ export function tela(el, rota) {
     const validos = ags.filter(a => a.status !== "cancelado");
     const previsto = validos.filter(a => a.status !== "faltou").reduce((s, a) => s + Number(a.total || 0), 0);
     const feito = ags.filter(a => a.status === "concluido").reduce((s, a) => s + Number(a.total || 0), 0);
-    const pend = pendentes.filter(a => a.data >= hoje()).sort((a, b) => (a.data + a.inicio).localeCompare(b.data + b.inicio));
+    const pend = pendentes.filter(a => a.data >= hoje() && podeMexer(a)).sort((a, b) => (a.data + a.inicio).localeCompare(b.data + b.inicio));
+    // horários que vagaram (cancelados, ainda no futuro) e têm gente na lista de espera
+    const vagos = ags.filter(a => a.status === "cancelado" && dataHora(a).getTime() > Date.now() && podeMexer(a))
+      .map(a => ({ a, n: interessadosNaVaga(espera, a).length })).filter(x => x.n).sort((x, y) => x.a.inicio.localeCompare(y.a.inicio));
     el.innerHTML = `
       <div class="titulo-tela"><div><h1>Agenda</h1><p>${D.modo === "demo" ? "Demonstração com clientes de exemplo." : "Toque num horário para confirmar, concluir ou falar com o cliente."}</p></div>
         <div class="botoes"><button class="btn mini sec" id="bloquear">${icone("cadeado")} Bloquear</button><button class="btn mini" id="novo">${icone("mais")} Novo horário</button></div></div>
       ${pend.length ? `<div class="faixa alerta" style="margin-bottom:14px">${icone("alerta")}<div style="flex:1;min-width:0"><strong>${pend.length} ${pend.length === 1 ? "horário aguarda" : "horários aguardam"} confirmação</strong>
         <div class="lista" style="margin-top:10px">${pend.slice(0, 5).map(a => `<div class="item"><div class="meio"><strong>${esc(a.clienteNome)}</strong><small>${esc(quando(a.data))} ${a.inicio} · ${esc((a.servicos || []).map(s => s.nome).join(" + "))} · ${esc(a.profissionalNome)}</small></div><div class="lado"><button class="btn mini ok" data-conf="${a.id}">${icone("check")} Confirmar</button></div></div>`).join("")}</div>
         ${pend.length > 5 ? `<p class="pequeno" style="margin-top:6px">e mais ${pend.length - 5}…</p>` : ""}</div></div>` : ""}
+      ${vagos.length ? `<div class="faixa" style="margin-bottom:14px">${icone("relogio")}<div style="flex:1;min-width:0"><strong>${vagos.length === 1 ? "Um horário vagou e tem gente esperando" : "Horários vagaram e tem gente esperando"}</strong>
+        <div class="lista" style="margin-top:10px">${vagos.map(({ a, n }) => `<div class="item"><div class="meio"><strong>${a.inicio} com ${esc(a.profissionalNome)}</strong><small>${n} na lista de espera · era de ${esc(a.clienteNome || "cliente")}</small></div><div class="lado"><button class="btn mini" data-vaga="${a.id}">Avisar</button></div></div>`).join("")}</div></div></div>` : ""}
       <div class="barra-dia">
         <button class="icone-btn" data-d="-1" aria-label="Dia anterior">${icone("voltar")}</button>
         <div class="meio"><strong>${esc(quando(dia))}</strong><small>${[hoje(), somaDias(hoje(), 1), somaDias(hoje(), -1)].includes(dia) ? esc(dataLonga(dia)) : ""}</small></div>
@@ -78,10 +97,11 @@ export function tela(el, rota) {
       <div class="kpis" style="margin-bottom:14px">
         <div class="kpi"><small>Atendimentos</small><b>${validos.filter(a => a.status !== "faltou").length}</b></div>
         <div class="kpi"><small>Aguardando</small><b>${ags.filter(a => a.status === "marcado").length}</b></div>
-        <div class="kpi ouro"><small>Previsto no dia</small><b>${reais(previsto)}</b></div>
+        <div class="kpi destaque"><small>Previsto no dia</small><b>${reais(previsto)}</b></div>
         <div class="kpi"><small>Já concluído</small><b>${reais(feito)}</b></div>
       </div>
-      ${profsAtivos().length > 1 ? `<div class="chips" style="margin-bottom:12px"><button class="chip ${!filtroProf ? "ativo" : ""}" data-f="">Todos</button>${profsAtivos().map(p => `<button class="chip ${filtroProf === p.id ? "ativo" : ""}" data-f="${esc(p.id)}">${esc(p.nome)}</button>`).join("")}</div>` : ""}
+      ${profsAtivos().length > 1 ? `<div class="chips" style="margin-bottom:12px"><button class="chip ${!filtroProf ? "ativo" : ""}" data-f="">Todos</button>${profsAtivos().map(p => `<button class="chip ${filtroProf === p.id ? "ativo" : ""}" data-f="${esc(p.id)}">${esc(p.nome)}${p.id === D.profId ? " (você)" : ""}</button>`).join("")}</div>` : ""}
+      ${espera.length ? `<p class="pequeno muted" style="margin:-4px 0 12px">${icone("relogio")} ${espera.length} ${espera.length === 1 ? "pessoa na lista de espera" : "pessoas na lista de espera"} deste dia. <button class="link" id="verEspera">Ver</button></p>` : ""}
       <div class="agenda-cols" style="--cols:${Math.min(ps.length, 3) || 1}">${ps.length ? ps.map(coluna).join("") : `<div class="card">Cadastre a equipe em Mais → Equipe.</div>`}</div>`;
 
     el.querySelectorAll("[data-d]").forEach(b => b.addEventListener("click", () => { dia = somaDias(dia, Number(b.dataset.d)); ouveDia(); desenha(); }));
@@ -100,6 +120,39 @@ export function tela(el, rota) {
     el.querySelectorAll("[data-novo]").forEach(b => b.addEventListener("click", () => novo(b.dataset.novo)));
     el.querySelector("#novo").addEventListener("click", () => novo(filtroProf));
     el.querySelector("#bloquear").addEventListener("click", bloquear);
+    el.querySelectorAll("[data-vaga]").forEach(b => b.addEventListener("click", () => vaga(ags.find(a => a.id === b.dataset.vaga))));
+    el.querySelector("#verEspera")?.addEventListener("click", () => listaEspera(espera, `Lista de espera · ${quando(dia).toLowerCase()}`));
+  }
+
+  // ---------- lista de espera ----------
+  /** Um horário vagou: mostra só quem marcou interesse nele, com um toque para avisar. */
+  function vaga(a) { if (a) listaEspera(interessadosNaVaga(espera, a), `Vagou: ${a.inicio} com ${a.profissionalNome}`, true, a); }
+  function listaEspera(l, titulo, vagou = false, liberado = null) {
+    // os blocos do horário recém-cancelado podem ainda não ter sumido da tela: desconsidera-os
+    const oc = conjunto(bloqsTodos.filter(b => !liberado || b.ag !== liberado.id)), loja = S.loja || {};
+    const linkApp = e => location.origin + location.pathname + "#/agendar?vaga=" + encodeURIComponent(e.id);
+    const texto = e => `Olá, ${(e.clienteNome || "").split(" ")[0]}! Abriu o horário de ${quando(e.data).toLowerCase()} às ${e.hora} na ${loja.nome || "Barbearia Rodrigues"}, que você queria. Para garantir, marque pelo app: ${linkApp(e)}`;
+    const ordenada = [...l].sort((x, y) => (x.criadoEm || 0) - (y.criadoEm || 0));
+    abreModal({
+      titulo,
+      corpo: ordenada.length ? `<p class="muted" style="margin-bottom:12px">${vagou ? "Só quem marcou interesse neste horário aparece aqui, por ordem de chegada. Quem ativou as notificações já é avisado pelo app; para os outros, mande pelo WhatsApp com um toque." : "Clientes que pediram para ser avisados se um horário ocupado vagar."}</p>
+        <div class="lista">${ordenada.map(e => { const livre = !!vagaAberta(e, oc); return `<div class="item" style="flex-wrap:wrap">${avatar(e.clienteNome, "", "p")}
+          <div class="meio"><strong>${esc(e.clienteNome || "Cliente")}</strong><small>quer ${e.hora}${e.profissional ? " com " + esc(S.profissional(e.profissional)?.nome || "") : ""} · ${livre ? '<span class="pill ok">horário livre</span>' : '<span class="pill">ainda ocupado</span>'}${e.avisadoEm ? ' <span class="pill info">avisado</span>' : ""}</small>
+          <small>${e.push ? "Recebe o aviso pelo app" : "Sem notificação do app: avise pelo WhatsApp"}</small></div>
+          <div class="lado" style="flex-direction:row">${e.clienteTelefone ? `<a class="btn mini whats" target="_blank" rel="noopener" data-zap="${esc(e.id)}" href="${linkWhats(e.clienteTelefone, texto(e))}">${icone("whats")} WhatsApp</a>` : ""}
+          <button class="btn mini sec" data-app="${esc(e.id)}">${icone("sino")} App</button></div></div>`; }).join("")}</div>`
+        : `<p class="muted">Ninguém marcou interesse neste horário. Ele voltou a aparecer como livre para quem abrir o app.</p>`,
+      aoAbrir: m => {
+        const marca = id => D.salvar("espera", id, { avisadoEm: Date.now() }).catch(() => { });
+        m.querySelectorAll("[data-zap]").forEach(b => b.addEventListener("click", () => marca(b.dataset.zap)));
+        m.querySelectorAll("[data-app]").forEach(b => b.addEventListener("click", async () => {
+          const e = ordenada.find(x => x.id === b.dataset.app);
+          b.disabled = true;
+          await N.enviar(e.uid, `Abriu o horário das ${e.hora}!`, `${quando(e.data)} às ${e.hora}: o horário que você queria ficou livre. Toque para marcar.`, "agendar?vaga=" + encodeURIComponent(e.id));
+          marca(e.id); toast("Aviso enviado no app.", "ok");
+        }));
+      }
+    });
   }
 
   // ---------- ações ----------
@@ -110,18 +163,60 @@ export function tela(el, rota) {
     faltou: a => ["Sentimos sua falta", `Você não compareceu ao horário de ${quando(a.data).toLowerCase()} às ${a.inicio}. Quer marcar outro?`]
   };
   async function muda(a, status) {
+    if (status === "concluido") return concluir(a);
     try {
       if (status === "cancelado") await liberar(a, "cancelado", { canceladoPor: "barbearia" });
+      // desfazer um atendimento concluído apaga o pagamento e a comissão lançados
+      else if (a.status === "concluido") await D.lote([
+        { tipo: "salvar", c: "agendamentos", id: a.id, dados: { status, atualizadoEm: Date.now(), pagamento: null, premio: false } },
+        { tipo: "apagar", c: "comissoes", id: a.id }
+      ]);
       else await D.salvar("agendamentos", a.id, { status, atualizadoEm: Date.now() });
       const m = MSG[status]?.(a);
       if (m) N.enviar(a.uid, m[0], m[1], status === "cancelado" || status === "faltou" ? "agendar" : "horarios");
       toast(STATUS[status].t, "ok");
+      if (status === "cancelado" && interessadosNaVaga(espera, a).length) vaga(a);   // vagou e tem gente esperando: pergunta se quer avisar
+    } catch (e) { toast(traduzErro(e), "erro"); }
+  }
+
+  /** % de comissão de quem atendeu. O barbeiro só conhece a própria; o dono lê a de qualquer um. */
+  async function pctDe(profId) {
+    if (profId === D.profId) return D.comissao;
+    if (!D.ehDono) return null;
+    const e = await D.pegar("equipe", profId).catch(() => null);
+    return Number(e && e.comissao) || 0;
+  }
+
+  /** Concluir = registrar como o cliente pagou. É daqui que saem o caixa, a comissão e a fidelidade. */
+  async function concluir(a) {
+    const pct = await pctDe(a.profissional);
+    if (pct === null) return toast("Só o próprio barbeiro ou o dono conclui este atendimento (por causa da comissão).", "erro");
+    const hist = await D.listar("agendamentos", [["uid", "==", a.uid]]).catch(() => []);
+    const pg = await pedePagamento({ titulo: "Concluir atendimento", sub: `${a.clienteNome || "Cliente"} · ${(a.servicos || []).map(s => s.nome).join(" + ")}`, valor: a.total, fidel: fidelidade(S.loja, hist) });
+    if (!pg) return;
+    try {
+      // O pagamento fica no agendamento (o cliente pode ver o que pagou). A comissão fica à parte,
+      // em comissoes/<id>, que só o dono e o próprio barbeiro leem.
+      await D.lote([
+        { tipo: "salvar", c: "agendamentos", id: a.id, dados: { status: "concluido", atualizadoEm: Date.now(), concluidoEm: Date.now(), pagamento: { forma: pg.forma, valor: pg.valor, recebido: pg.recebido, troco: pg.troco, gorjeta: pg.gorjeta }, premio: pg.premio } },
+        { tipo: "criar", c: "comissoes", id: a.id, dados: { profissional: a.profissional, data: a.data, base: pg.valor, pct, valor: comissaoSobre(pg.valor, pct), em: Date.now() } }
+      ]);
+      N.enviar(a.uid, ...MSG.concluido(), "horarios");
+      toast(`Concluído · ${reais(pg.valor)} em ${nomeForma(pg.forma).toLowerCase()}${pg.troco ? ` · troco ${reais(pg.troco)}` : ""}${pg.gorjeta ? ` · gorjeta ${reais(pg.gorjeta)}` : ""}`, "ok");
+      // foi o último horário do dia? Então o relatório do dia já está pronto.
+      const meus = x => D.pode("caixaGeral") || !D.profId || x.profissional === D.profId;
+      const sobrou = ags.some(x => x.id !== a.id && ATIVOS.includes(x.status) && meus(x));
+      if (a.data === hoje() && !sobrou && D.pode("caixa")) abreModal({
+        titulo: "Dia encerrado",
+        corpo: `<p class="muted">Esse foi o último atendimento marcado para hoje. O relatório do dia está pronto: o que entrou, o que saiu, cancelamentos, horários preenchidos e comissões.</p>`,
+        acoes: [{ t: "Agora não", cls: "sec" }, { t: "Ver relatório do dia", fn: () => { ir("dono/caixa?tipo=dia&data=" + a.data); } }]
+      });
     } catch (e) { toast(traduzErro(e), "erro"); }
   }
 
   function detalhe(a) {
     const loja = S.loja || {};
-    const tel = a.clienteTelefone;
+    const tel = a.clienteTelefone, mexe = podeMexer(a);
     const lembrete = `Olá, ${(a.clienteNome || "").split(" ")[0]}! Passando para lembrar do seu horário na ${loja.nome || "Barbearia Rodrigues"}: ${quando(a.data).toLowerCase()} às ${a.inicio} com ${a.profissionalNome}. Até lá!`;
     const fecha = abreModal({
       titulo: a.clienteNome || "Agendamento",
@@ -130,29 +225,35 @@ export function tela(el, rota) {
         <div class="linha">${icone("tesoura")}<div style="flex:1">${(a.servicos || []).map(s => `<div style="display:flex;justify-content:space-between;gap:8px"><span>${esc(s.nome)}</span><span class="preco">${reais(s.preco)}</span></div>`).join("")}</div></div>
         ${a.obs ? `<div class="linha">${icone("lapis")}<div class="muted">“${esc(a.obs)}”</div></div>` : ""}
         <div class="linha">${icone("usuario")}<div><span class="pill ${STATUS[a.status]?.c}">${STATUS[a.status]?.t}</span>${tel ? `<div class="muted" style="margin-top:4px">${esc(foneFormata(tel))}</div>` : ""}<div class="muted pequeno">Marcado ${a.origem === "balcao" ? "pela barbearia" : "pelo app"}</div></div></div>
-        <div class="total"><span>Total</span><b class="preco">${reais(a.total)}</b></div>
+        <div class="total"><span>${a.status === "concluido" && a.pagamento ? `Recebido · ${esc(nomeForma(a.pagamento.forma))}${a.premio ? " · prêmio fidelidade" : ""}` : "Total"}</span><b class="preco">${reais(a.status === "concluido" ? valorPago(a) : a.total)}</b></div>
+        ${a.status === "concluido" && a.pagamento && (a.pagamento.troco || a.pagamento.gorjeta) ? `<p class="muted pequeno" style="margin-top:6px">Cliente entregou ${reais(a.pagamento.recebido)} · ${a.pagamento.gorjeta ? `gorjeta ${reais(a.pagamento.gorjeta)}` : `troco ${reais(a.pagamento.troco)}`}</p>` : ""}
       </div>
+      ${mexe ? "" : `<p class="muted pequeno" style="margin-top:12px">Este horário é de outro barbeiro: você pode ver, mas só ele ou o dono altera.</p>`}
       <div class="botoes" style="margin-top:16px">
-        ${a.status === "marcado" ? `<button class="btn ok" data-s="confirmado">${icone("check")} Confirmar</button>` : ""}
-        ${ATIVOS.includes(a.status) ? `<button class="btn" data-s="concluido">Concluir atendimento</button>` : ""}
-        ${tel ? `<a class="btn whats" target="_blank" rel="noopener" href="${linkWhats(tel, lembrete)}">${icone("whats")} Lembrar no WhatsApp</a>` : ""}
-        <a class="btn sec" href="#/dono/cliente/${encodeURIComponent(a.uid)}">${icone("usuario")} Ficha do cliente</a>
-        ${ATIVOS.includes(a.status) ? `<button class="btn fantasma" data-s="faltou">Não compareceu</button><button class="btn fantasma" data-s="cancelado" style="color:var(--perigo)!important">Cancelar</button>` : ""}
-        ${a.status === "concluido" || a.status === "faltou" ? `<button class="btn fantasma" data-s="confirmado">Desfazer (voltar para confirmado)</button>` : ""}
+        ${mexe && a.status === "marcado" ? `<button class="btn ok" data-s="confirmado">${icone("check")} Confirmar</button>` : ""}
+        ${mexe && ATIVOS.includes(a.status) ? `<button class="btn" data-s="concluido">${icone("dinheiro")} Concluir e receber</button>` : ""}
+        ${mexe && tel ? `<a class="btn whats" target="_blank" rel="noopener" href="${linkWhats(tel, lembrete)}">${icone("whats")} Lembrar no WhatsApp</a>` : ""}
+        ${D.pode("clientes") ? `<a class="btn sec" href="#/dono/cliente/${encodeURIComponent(a.uid)}">${icone("usuario")} Ficha do cliente</a>` : ""}
+        ${mexe && ATIVOS.includes(a.status) ? `<button class="btn fantasma" data-s="faltou">Não compareceu</button><button class="btn fantasma" data-s="cancelado" style="color:var(--perigo)!important">Cancelar</button>` : ""}
+        ${mexe && (a.status === "concluido" || a.status === "faltou") ? `<button class="btn fantasma" data-s="confirmado">Desfazer (voltar para confirmado)</button>` : ""}
+        ${mexe && a.status === "cancelado" && dataHora(a).getTime() > Date.now() ? `<button class="btn sec" data-vg>${icone("relogio")} Lista de espera deste horário</button>` : ""}
       </div>`,
-      aoAbrir: (m, f) => m.querySelectorAll("[data-s]").forEach(b => b.addEventListener("click", async () => {
-        const s = b.dataset.s;
-        if (s === "cancelado" && !await confirma("Cancelar este horário?", "O cliente recebe um aviso no app e o horário fica livre.", "Cancelar horário", true)) return;
-        f(); muda(a, s);
-      }))
+      aoAbrir: (m, f) => {
+        m.querySelectorAll("[data-s]").forEach(b => b.addEventListener("click", async () => {
+          const s = b.dataset.s;
+          if (s === "cancelado" && !await confirma("Cancelar este horário?", "O cliente recebe um aviso no app e o horário fica livre.", "Cancelar horário", true)) return;
+          f(); muda(a, s);
+        }));
+        m.querySelector("[data-vg]")?.addEventListener("click", () => { f(); vaga(a); });
+      }
     });
     void fecha;
   }
 
   // ---------- novo horário (balcão / telefone) ----------
   async function novo(profPadrao) {
-    const clientes = await D.listar("clientes").catch(() => []);
-    const st = { cliente: null, sel: [], prof: profPadrao || (profsAtivos()[0] || {}).id, data: dia, hora: "", slots: [] };
+    const clientes = D.pode("clientes") ? await D.listar("clientes").catch(() => []) : [];   // sem a permissão, o barbeiro só cadastra na hora
+    const st = { cliente: null, sel: [], prof: profPadrao || (meusProfs()[0] || {}).id, data: dia, hora: "", slots: [] };
     const dur = () => st.sel.reduce((s, id) => s + Number(S.servico(id)?.duracao || 0), 0);
     let modal;
     const calcula = async () => {
@@ -168,7 +269,7 @@ export function tela(el, rota) {
       </label>
       <div class="campo"><span>Serviços</span><div class="lista" style="max-height:240px;overflow:auto">${categorias(S.servicos.filter(s => s.ativo !== false)).map(([c, l]) => l.map(s => `<div class="sel-serv ${st.sel.includes(s.id) ? "on" : ""}" data-s="${esc(s.id)}" role="checkbox" aria-checked="${st.sel.includes(s.id)}" tabindex="0"><span class="marca-sel">${icone("check")}</span><div class="meio"><strong>${esc(s.nome)}</strong><small>${esc(c)} · ${duracao(s.duracao)}</small></div><span class="preco">${precoServ(s)}</span></div>`).join("")).join("")}</div></div>
       <div class="linha2">
-        <label class="campo"><span>Profissional</span><select id="prof">${profsAtivos().map(p => `<option value="${esc(p.id)}" ${p.id === st.prof ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select></label>
+        <label class="campo"><span>Profissional</span><select id="prof">${meusProfs().map(p => `<option value="${esc(p.id)}" ${p.id === st.prof ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select></label>
         <label class="campo"><span>Dia</span><input type="date" id="data" value="${st.data}" min="${hoje()}"></label>
       </div>
       <div class="campo"><span>Horário ${st.sel.length ? `(${duracao(dur())})` : ""}</span>
@@ -227,7 +328,7 @@ export function tela(el, rota) {
     abreModal({
       titulo: "Bloquear horário",
       corpo: `<p class="muted" style="margin-bottom:12px">Folga, almoço, compromisso… Ninguém consegue marcar nesse período. Horários que já têm cliente não são mexidos.</p>
-        <label class="campo"><span>Profissional</span><select id="bp"><option value="*">Todos</option>${profsAtivos().map(p => `<option value="${esc(p.id)}" ${filtroProf === p.id ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select></label>
+        <label class="campo"><span>Profissional</span><select id="bp">${todos || !D.profId ? '<option value="*">Todos</option>' : ""}${meusProfs().map(p => `<option value="${esc(p.id)}" ${filtroProf === p.id ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select></label>
         <label class="campo"><span>Dia</span><input type="date" id="bd" value="${dia}" min="${hoje()}"></label>
         <div class="linha2"><label class="campo"><span>Das</span><input type="time" id="bi" value="12:00" step="900"></label><label class="campo"><span>Até</span><input type="time" id="bf" value="13:00" step="900"></label></div>
         <label class="check" style="margin-bottom:12px"><input type="checkbox" id="btodo"> <span>Dia inteiro</span></label>

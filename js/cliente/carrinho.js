@@ -54,7 +54,7 @@ export function tela(el) {
         itens: l.map(i => ({ id: i.id, nome: i.p.nome, preco: Number(i.p.preco), qtd: i.qtd })),
         total: l.reduce((s, i) => s + i.qtd * Number(i.p.preco), 0), obs: obs.trim(), status: "novo", criadoEm: Date.now()
       });
-      S.carrinho = []; ls.set("br.carrinho", []); N.atualizaBadges(); obs = "";
+      S.carrinho = []; ls.set("bc.carrinho", []); N.atualizaBadges(); obs = "";
       toast("Reserva enviada! Avisamos quando estiver pronta.", "ok");
       desenha();
     } catch (err) { toast(traduzErro(err), "erro"); b.disabled = false; }

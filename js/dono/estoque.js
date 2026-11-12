@@ -50,7 +50,7 @@ export function tela(el) {
       <div class="kpis" style="margin-bottom:14px">
         <div class="kpi"><small>Produtos</small><b>${prods.length}</b><i>${prods.reduce((s, p) => s + Number(p.e.quantidade), 0)} unidades</i></div>
         <div class="kpi"><small>Valor de custo</small><b>${reais(valorCusto)}</b></div>
-        <div class="kpi ouro"><small>Valor de venda</small><b>${reais(valorVenda)}</b><i>lucro previsto ${reais(valorVenda - valorCusto)}</i></div>
+        <div class="kpi destaque"><small>Valor de venda</small><b>${reais(valorVenda)}</b><i>lucro previsto ${reais(valorVenda - valorCusto)}</i></div>
         <div class="kpi"><small>Repor</small><b style="color:${baixos ? "var(--aviso)" : "inherit"}">${baixos}</b><i>no mínimo ou abaixo</i></div>
       </div>
       <div class="busca" style="margin-bottom:10px">${icone("busca")}<input type="search" id="busca" placeholder="Buscar produto" value="${esc(busca)}"></div>

@@ -1,0 +1,56 @@
+/* ---------- Caixa, lista de espera, fidelidade e aviso de nova versão ---------- */
+.formas { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.forma { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--borda); background: var(--sup2); color: var(--txt); font-weight: 600; font-size: 14px; cursor: pointer; text-align: left; }
+.forma .ic { width: 20px; height: 20px; color: var(--muted); flex: none; }
+.forma.on { background: var(--ouro); border-color: var(--ouro); color: var(--ouro-contrast); }
+.forma.on .ic { color: var(--ouro-contrast); }
+.mov { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--sup3); color: var(--muted); }
+.mov .ic { width: 18px; height: 18px; }
+.mov.perigo { background: var(--perigo-sut); color: var(--perigo); }
+.item .lado .icone-btn { width: 32px; height: 32px; }
+button.link { background: none; border: 0; padding: 0; color: var(--ouro-2); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; }
+:root[data-theme="light"] button.link { color: var(--ouro); }
+p .ic { width: 15px; height: 15px; vertical-align: -2px; }
+label.check.faixa { align-items: flex-start; }
+
+.troco { padding: 10px 14px; border-radius: 12px; background: var(--sup2); border: 1px solid var(--borda); font-size: 15px; }
+.troco b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.troco.tem { border-color: var(--ouro-2); background: var(--ouro-soft); }
+.troco.falta { border-color: var(--perigo); color: var(--perigo); }
+
+/* lista de espera (cliente) */
+.espera-bloco { margin-top: 22px; padding-top: 6px; border-top: 1px dashed var(--borda); }
+.slot.espera { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border-style: dashed; color: var(--muted); background: transparent; }
+.slot.espera .ic { width: 14px; height: 14px; }
+.slot.espera.on { background: var(--ouro-soft); border-style: solid; border-color: var(--ouro-2); color: var(--txt); }
+
+/* cartão fidelidade */
+.fidelidade { padding: 16px; border-radius: var(--raio); border: 1px solid var(--borda); background: linear-gradient(160deg, var(--ouro-soft), var(--sup)); margin-bottom: 16px; }
+.fidelidade.completo { border-color: var(--ouro-2); }
+.fid-topo { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.fid-topo .ic { width: 26px; height: 26px; color: var(--ouro-2); flex: none; }
+.fid-topo strong { display: block; }
+.fid-topo small { color: var(--muted); font-size: 13px; }
+.selos { display: flex; flex-wrap: wrap; gap: 8px; }
+.selos i { width: 34px; height: 34px; border-radius: 50%; border: 1px dashed var(--borda); display: grid; place-items: center; font-style: normal; font-size: 12px; font-weight: 700; color: var(--fraco); }
+.selos i.on { border: 0; background: var(--ouro); color: var(--ouro-contrast); }
+.selos i .ic { width: 16px; height: 16px; }
+.fidelidade p { margin-top: 10px; font-size: 13.5px; color: var(--muted); }
+
+/* aviso de nova versão */
+.nova-versao { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--abas) + 16px + env(safe-area-inset-bottom, 0)); z-index: 96; width: min(94vw, 460px); display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 16px; background: var(--sup); border: 1px solid var(--ouro-2); box-shadow: var(--sombra); }
+.nova-versao img { width: 40px; height: 40px; border-radius: 10px; flex: none; }
+.nova-versao .meio { flex: 1; min-width: 0; }
+.nova-versao strong { display: block; }
+.nova-versao small { color: var(--muted); font-size: 13px; }
+body.sem-abas .nova-versao { bottom: 20px; }
+@media (min-width: 960px) { .nova-versao { bottom: 24px; } }
+
+/* imprimir o fechamento do caixa */
+@media print {
+  .topo, .abas, .nao-imprime, .toast, .nova-versao, .titulo-tela .botoes, .seg, .chips, .barra-dia .icone-btn, .barra-dia .btn, [data-del] { display: none !important; }
+  body, .tela { background: #fff !important; color: #000 !important; padding: 0 !important; margin: 0 !important; }
+  .card, .kpi, .lista, .faixa { background: #fff !important; border-color: #bbb !important; box-shadow: none !important; color: #000 !important; }
+  .kpi small, .kpi i, .item .meio small, .muted { color: #444 !important; }
+  .barras .b i { background: #555 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}

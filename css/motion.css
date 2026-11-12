@@ -1,0 +1,36 @@
+/* Movimento e profundidade — CSS leve, sem dependências */
+:root { --transition-soft: .22s cubic-bezier(.2,.75,.25,1); --transition-lift: .36s cubic-bezier(.2,.8,.2,1); }
+::selection { color:#fff; background:var(--ouro); }
+html { scroll-behavior:smooth; }
+.hero { isolation:isolate; perspective:1100px; border-radius:0 0 20px 20px; }
+.hero::before { content:""; position:absolute; inset:0; z-index:1; pointer-events:none; background:radial-gradient(ellipse at 82% 18%, color-mix(in srgb,var(--creme) 17%,transparent), transparent 38%),linear-gradient(115deg,transparent 35%,color-mix(in srgb,var(--ouro) 24%,transparent)); }
+.hero::after { z-index:1; }
+.hero > img { transform:scale(1.035) translateZ(-12px); transition:transform 1.1s cubic-bezier(.2,.7,.2,1); }
+.hero-txt { z-index:2; animation: casa-rise .72s cubic-bezier(.2,.8,.2,1) both; }
+.hero-txt .logo-g { border:2px solid color-mix(in srgb,var(--creme) 70%,transparent); box-shadow:0 0 0 6px color-mix(in srgb,var(--ouro) 30%,transparent),0 18px 46px rgba(0,0,0,.36); transform:translateZ(24px) rotateY(-7deg); }
+.card,.cartao-serv,.produto,.prof-op,.menu-grade a,.kpi,.galeria button { transform-style:preserve-3d; transition:transform var(--transition-lift),box-shadow var(--transition-lift),border-color var(--transition-soft),background-color var(--transition-soft); }
+.cartao-serv,.produto,.menu-grade a,.kpi { box-shadow:0 8px 24px rgba(0,0,0,.10); }
+.cartao-serv img,.produto .foto img,.galeria img { transition:transform .6s cubic-bezier(.2,.7,.2,1),filter .4s ease; }
+.btn { box-shadow:0 8px 20px color-mix(in srgb,var(--ouro) 22%,transparent); transition:transform var(--transition-soft),filter var(--transition-soft),box-shadow var(--transition-soft),background var(--transition-soft); }
+.btn:hover { transform:translateY(-2px); box-shadow:0 12px 26px color-mix(in srgb,var(--ouro) 30%,transparent); }
+.icone-btn,.abas a,.chip-visao { transition:color var(--transition-soft),background-color var(--transition-soft),transform var(--transition-soft); }
+@media (hover:hover) and (pointer:fine) {
+  .hero:hover > img { transform:scale(1.07) translateZ(-10px); }
+  .cartao-serv:hover,.produto:hover,.menu-grade a:hover,.kpi:hover { transform:perspective(900px) translateY(-5px) rotateX(1.2deg); box-shadow:0 20px 40px rgba(0,0,0,.20); }
+  .prof-op:hover { transform:perspective(800px) translateY(-3px) rotateY(-1deg); }
+  .galeria button:hover { transform:perspective(900px) translateY(-4px) rotateX(2deg) rotateY(-1.5deg); box-shadow:0 18px 34px rgba(0,0,0,.24); }
+  .galeria button:hover img,.cartao-serv:hover img,.produto:hover .foto img { transform:scale(1.055); filter:saturate(1.08); }
+}
+@keyframes casa-rise { from { opacity:0; transform:translate3d(0,18px,0); } to { opacity:1; transform:translate3d(0,0,0); } }
+@media (max-width:440px) {
+  .hero { min-height:360px; }
+  .hero-txt { padding:22px 16px 20px; }
+  .hero-txt h1 { font-size:clamp(26px,8vw,32px); }
+  .hero .botoes > .btn { flex-basis:100%; }
+  .card { padding:14px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  html { scroll-behavior:auto; }
+  *,*::before,*::after { animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; scroll-behavior:auto!important; }
+  .hero > img,.hero-txt .logo-g,.cartao-serv,.produto,.prof-op,.menu-grade a,.kpi,.galeria button { transform:none!important; }
+}

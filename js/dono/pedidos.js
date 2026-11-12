@@ -5,6 +5,7 @@ import { titulo } from "../ui.js";
 import { STATUS_PEDIDO } from "../cliente/carrinho.js";
 import { movimentar } from "./estoque.js";
 import { N } from "../notificacoes.js";
+import { pedePagamento } from "./pagamento.js";
 
 export function tela(el) {
   let pedidos = null, aba = "abertos";
@@ -21,7 +22,7 @@ export function tela(el) {
       <div class="kpis" style="margin-bottom:14px">
         <div class="kpi"><small>Novos</small><b>${pedidos.filter(p => p.status === "novo").length}</b></div>
         <div class="kpi"><small>Prontos p/ retirar</small><b>${pedidos.filter(p => p.status === "separado").length}</b></div>
-        <div class="kpi ouro"><small>Vendido no mês</small><b>${reais(vendidoMes)}</b></div>
+        <div class="kpi destaque"><small>Vendido no mês</small><b>${reais(vendidoMes)}</b></div>
         <div class="kpi"><small>Em aberto</small><b>${reais(abertos.reduce((s, p) => s + p.total, 0))}</b></div>
       </div>
       <div class="seg" style="margin-bottom:12px"><button class="${aba === "abertos" ? "ativo" : ""}" data-a="abertos">Em aberto (${abertos.length})</button><button class="${aba === "fechados" ? "ativo" : ""}" data-a="fechados">Finalizados (${fechados.length})</button></div>
@@ -45,10 +46,16 @@ export function tela(el) {
 
   async function muda(p, status, b) {
     if (status === "cancelado" && !await confirma("Cancelar reserva?", "O cliente recebe um aviso no app.", "Cancelar reserva", true)) return;
+    let pagamento = null;
+    if (status === "retirado") {
+      const pg = await pedePagamento({ titulo: "Entregar e receber", sub: `${p.clienteNome || "Cliente"} · ${p.itens.map(i => `${i.qtd}× ${i.nome}`).join(", ")}`, valor: p.total, botao: "Entregue e pago", gorjeta: false });
+      if (!pg) return;
+      pagamento = { forma: pg.forma, valor: pg.valor, recebido: pg.recebido, troco: pg.troco };
+    }
     b.disabled = true;
     try {
       if (status === "retirado") for (const i of p.itens) await movimentar(i.id, "shop", i.qtd, "Pedido " + p.id.slice(-5));
-      await D.salvar("pedidos", p.id, { status, atualizadoEm: Date.now() });
+      await D.salvar("pedidos", p.id, { status, atualizadoEm: Date.now(), ...(pagamento ? { pagamento } : {}) });
       if (status === "separado") N.enviar(p.uid, "Sua reserva está pronta! 🛍️", `${p.itens.map(i => `${i.qtd}× ${i.nome}`).join(", ")} — é só retirar na barbearia. Total ${reais(p.total)}.`, "carrinho");
       if (status === "cancelado") N.enviar(p.uid, "Reserva cancelada", "Sua reserva do Shop foi cancelada pela barbearia. Fale com a gente se tiver dúvida.", "carrinho");
       toast(STATUS_PEDIDO[status].t, "ok");

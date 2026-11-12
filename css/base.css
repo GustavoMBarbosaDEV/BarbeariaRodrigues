@@ -1,0 +1,24 @@
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--topo) + 12px); }
+body {
+  margin: 0; background: var(--bg); color: var(--txt); font: 400 15px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased; min-height: 100vh; overflow-x: hidden;
+}
+img { max-width: 100%; display: block; }
+a { color: var(--ouro-2); text-decoration: none; }
+:root[data-theme="light"] a { color: var(--ouro); }
+button, input, select, textarea { font: inherit; color: inherit; }
+h1, h2, h3, h4 { margin: 0; line-height: 1.2; overflow-wrap: anywhere; }
+h1, h2 { font-family: var(--serif); font-weight: 700; letter-spacing: -.01em; }
+p { margin: 0; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--ouro-2); outline-offset: 2px; border-radius: 6px; }
+.ic { width: 22px; height: 22px; flex: none; }
+.muted { color: var(--muted); }
+.fraco { color: var(--fraco); }
+.pequeno { font-size: 13px; }
+.direita { text-align: right; }
+.centro { text-align: center; }
+.num { font-variant-numeric: tabular-nums; }
+.pular { position: absolute; left: -999px; top: 8px; background: var(--ouro); color: var(--ouro-contrast); padding: 8px 12px; border-radius: 8px; z-index: 100; }
+.pular:focus { left: 8px; }

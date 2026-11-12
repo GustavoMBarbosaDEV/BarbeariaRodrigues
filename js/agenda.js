@@ -36,11 +36,11 @@ export const profsAtivos = () => S.profissionais.filter(p => p.ativo !== false);
 const chave = (prof, data, t) => `${prof}_${data}_${hhmm(t).replace(":", "")}`;
 function blocos(inicioMin, dur) { const r = []; for (let t = inicioMin; t < inicioMin + dur; t += BLOCO) r.push(t); return r; }
 
+/** Bloqueios de um dia (cada um: profissional, hora "HHMM", ag = id do agendamento ou null se for folga/pausa). */
+export const bloqueiosDoDia = data => D.listar("bloqueios", [["data", "==", data]]);
+export const conjunto = lista => new Set(lista.map(b => `${b.profissional}_${b.hora}`));
 /** Lê os bloqueios de um dia: Set com "prof_HHMM". */
-export async function ocupadosDoDia(data) {
-  const l = await D.listar("bloqueios", [["data", "==", data]]);
-  return new Set(l.map(b => `${b.profissional}_${b.hora}`));
-}
+export async function ocupadosDoDia(data) { return conjunto(await bloqueiosDoDia(data)); }
 
 /**
  * Horários livres num dia para uma duração.
@@ -104,13 +104,23 @@ export async function liberar(ag, status, extra = {}) {
   await D.lote(ops);
 }
 
-/** Pode o cliente cancelar sozinho? (até X horas antes) */
+/** Até quantos minutos antes o cliente cancela sozinho (padrão 1h30). Aceita o ajuste antigo, que era em horas. */
+export function cancelarAteMin(loja = S.loja) {
+  const l = loja || {};
+  if (l.cancelarAteMin != null) return Number(l.cancelarAteMin) || 0;
+  if (l.cancelarAteHoras != null) return (Number(l.cancelarAteHoras) || 0) * 60;
+  return 90;
+}
+/** Quantos minutos antes o cliente é lembrado do horário (padrão 2 h). */
+export const lembreteMin = (loja = S.loja) => Number((loja || {}).lembreteMin ?? 120) || 0;
+export function textoPrazo(m) { return !m ? "a qualquer momento" : m < 60 ? `${m} min antes` : m % 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")} antes` : `${m / 60} h antes`; }
+/** Hora limite ("HH:MM") para o cliente cancelar aquele horário. */
+export const limiteCancelar = ag => { const d = new Date(dataHora(ag).getTime() - cancelarAteMin() * 60000); return hhmm(d.getHours() * 60 + d.getMinutes()); };
+
+/** Pode o cliente cancelar sozinho? (até X minutos antes) */
 export function podeCancelar(ag) {
   if (!ATIVOS.includes(ag.status)) return false;
-  const horas = Number((S.loja || {}).cancelarAteHoras ?? 2);
-  const [a, m, d] = ag.data.split("-").map(Number);
-  const quando = new Date(a, m - 1, d, ...ag.inicio.split(":").map(Number));
-  return quando.getTime() - Date.now() >= horas * 3600000;
+  return dataHora(ag).getTime() - Date.now() >= cancelarAteMin() * 60000;
 }
 export function dataHora(ag) { const [a, m, d] = ag.data.split("-").map(Number); return new Date(a, m - 1, d, ...ag.inicio.split(":").map(Number)); }
 export const passou = ag => dataHora(ag).getTime() + (ag.duracao || 30) * 60000 < Date.now();
@@ -138,7 +148,7 @@ export function arquivoCalendario(ag) {
     `SUMMARY:${txt((ag.servicos || []).map(s => s.nome).join(" + ") + " — " + (loja.nome || "Barbearia"))}`,
     `LOCATION:${txt([loja.endereco, loja.cidade].filter(Boolean).join(", "))}`,
     `DESCRIPTION:${txt("Com " + (ag.profissionalNome || "a equipe") + ". Para remarcar ou cancelar, use o app.")}`,
-    "BEGIN:VALARM", "TRIGGER:-PT60M", "ACTION:DISPLAY", "DESCRIPTION:Seu horário na barbearia é daqui a 1 hora", "END:VALARM",
+    "BEGIN:VALARM", `TRIGGER:-PT${lembreteMin() || 120}M`, "ACTION:DISPLAY", "DESCRIPTION:Seu horário na barbearia está chegando", "END:VALARM",
     "BEGIN:VALARM", "TRIGGER:-P1D", "ACTION:DISPLAY", "DESCRIPTION:Amanhã tem barbearia", "END:VALARM",
     "END:VEVENT", "END:VCALENDAR"
   ];
@@ -146,6 +156,72 @@ export function arquivoCalendario(ag) {
   a.href = URL.createObjectURL(new Blob([linhas.join("\r\n")], { type: "text/calendar" }));
   a.download = `horario-barbearia-${ag.data}.ics`;
   document.body.appendChild(a); a.click(); a.remove();
+}
+
+// =====================================================================
+//  Lista de espera
+//  O cliente marca interesse num horário que já está ocupado. Se o horário
+//  vagar, só quem marcou interesse naquele horário é avisado.
+//  Documento: espera/<uid>_<data>_<HHMM>
+// =====================================================================
+export const idEspera = (uid, data, hora) => `${uid}_${data}_${hora.replace(":", "")}`;
+
+/**
+ * Horários ocupados por OUTRO CLIENTE (não por folga/pausa da barbearia) em que a
+ * duração pedida caberia se o horário vagasse. Devolve ["09:00", ...].
+ */
+export function ocupadosParaEspera(data, profs, duracao, bloqs) {
+  const loja = S.loja || {};
+  const passo = Number(loja.intervalo) || 30;
+  if (data < hoje()) return [];
+  const agora = new Date();
+  const limite = data === hoje() ? agora.getHours() * 60 + agora.getMinutes() : -1;
+  const porChave = new Map(bloqs.map(b => [`${b.profissional}_${b.hora}`, b]));
+  const horas = new Set();
+  for (const p of profs) {
+    const e = expediente(p, data);
+    if (!e) continue;
+    const abre = min(e.abre), fecha = min(e.fecha);
+    const pausa = e.pausa && e.pausa[0] ? [min(e.pausa[0]), min(e.pausa[1])] : null;
+    for (let t = abre; t + duracao <= fecha; t += passo) {
+      if (t <= limite) continue;
+      if (pausa && t < pausa[1] && t + duracao > pausa[0]) continue;
+      const no = blocos(t, duracao).map(b => porChave.get(`${p.id}_${hhmm(b).replace(":", "")}`)).filter(Boolean);
+      if (no.length && no.every(b => b.ag)) horas.add(hhmm(t));   // ocupado só por clientes: pode vagar
+    }
+  }
+  return [...horas].sort((a, b) => min(a) - min(b));
+}
+
+/** O cliente entra na lista de espera de um horário ocupado. */
+export async function entrarNaEspera({ data, hora, profissional = "", servicos = [], duracao = 30, push = false }) {
+  const u = D.usuario, p = S.perfil || {};
+  const id = idEspera(u.uid, data, hora);
+  await D.salvar("espera", id, { uid: u.uid, clienteNome: p.nome || u.nome || "", clienteTelefone: p.telefone || "", data, hora, profissional, servicos, duracao: Number(duracao) || 30, push: !!push, criadoEm: Date.now() }, false);
+  return id;
+}
+export const sairDaEspera = id => D.apagar("espera", id);
+
+/** Profissionais que poderiam atender aquele interesse. */
+export function profsDaEspera(e) {
+  return profsAtivos().filter(p => (!e.profissional || p.id === e.profissional) && fazServico(p, e.servicos || []));
+}
+/** O horário daquele interesse está livre agora? Devolve o id do profissional livre, ou "". */
+export function vagaAberta(e, ocupados) {
+  if (dataHora({ data: e.data, inicio: e.hora }).getTime() <= Date.now()) return "";
+  const t = min(e.hora), dur = Number(e.duracao) || 30;
+  for (const p of profsDaEspera(e)) {
+    const x = expediente(p, e.data);
+    if (!x || t < min(x.abre) || t + dur > min(x.fecha)) continue;
+    if (x.pausa && x.pausa[0] && t < min(x.pausa[1]) && t + dur > min(x.pausa[0])) continue;
+    if (!blocos(t, dur).some(b => ocupados.has(`${p.id}_${hhmm(b).replace(":", "")}`))) return p.id;
+  }
+  return "";
+}
+/** Interessados num horário que acabou de vagar (para o barbeiro avisar). */
+export function interessadosNaVaga(lista, ag) {
+  return lista.filter(e => e.data === ag.data && (!e.profissional || e.profissional === ag.profissional)
+    && min(e.hora) < min(ag.inicio) + Number(ag.duracao || 0) && min(ag.inicio) < min(e.hora) + Number(e.duracao || 30));
 }
 
 export const diasDisponiveis = (n = 30) => { const r = []; const d = new Date(); for (let i = 0; i < n; i++) { r.push(iso(d)); d.setDate(d.getDate() + 1); } return r; };

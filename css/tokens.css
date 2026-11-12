@@ -1,0 +1,28 @@
+/* Barbearia Rodrigues — design tokens
+   Cores tiradas da logo: preto, couro e dourado envelhecido. */
+:root {
+  --bg:#0d0b09; --sup:#171410; --sup2:#201b16; --sup3:#2a241d; --borda:#3a3126;
+  --txt:#f3ece2; --muted:#b3a591; --fraco:#85786a;
+  --ouro:#c99a5b; --ouro-2:#e3bb7e; --ouro-contrast:#1a130b; --ouro-soft:rgba(201,154,91,.18);
+  --creme:#dcc9a8; --creme-clara:#f1e6d2;
+  --ok:#63c08a; --ok-sut:rgba(99,192,138,.14);
+  --aviso:#e5b14a; --aviso-sut:rgba(229,177,74,.15);
+  --perigo:#e66a57; --perigo-sut:rgba(230,106,87,.14);
+  --info:#7fb2e5; --info-sut:rgba(127,178,229,.14);
+  --sombra:0 18px 48px rgba(0,0,0,.42); --raio:18px; --raio-p:11px;
+  --topo:64px; --abas:66px;
+  --serif:"Playfair Display",Georgia,"Times New Roman",serif;
+  --sans:Inter,"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  color-scheme:dark;
+}
+:root[data-theme="light"] {
+  --bg:#f6f1ea; --sup:#fffdfa; --sup2:#f0e8dd; --sup3:#e8ddcf; --borda:#dccdb8;
+  --txt:#1d1813; --muted:#6c5f50; --fraco:#8d806f;
+  --ouro:#8f6226; --ouro-2:#a87432; --ouro-contrast:#fffaf2; --ouro-soft:rgba(143,98,38,.12);
+  --creme:#7a6a55; --creme-clara:#d9cbb6;
+  --ok:#23874f; --ok-sut:rgba(35,135,79,.12);
+  --aviso:#a86d00; --aviso-sut:rgba(201,135,0,.14);
+  --perigo:#c2412d; --perigo-sut:rgba(194,65,45,.1);
+  --info:#2c6aa8; --info-sut:rgba(44,106,168,.1);
+  --sombra:0 16px 40px rgba(60,40,20,.12); color-scheme:light;
+}

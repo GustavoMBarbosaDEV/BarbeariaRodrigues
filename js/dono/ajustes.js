@@ -6,14 +6,16 @@ import { titulo } from "../ui.js";
 import { catalogo } from "../seed.js";
 import { htmlHorario, ligaHorario, leHorario } from "./horario-editor.js";
 import { trocaTema, VERSAO } from "../app.js";
+import { cancelarAteMin, lembreteMin, textoPrazo } from "../agenda.js";
 
 export function tela(el) {
   let admins = [];
   const desenha = () => {
     const l = S.loja || {};
-    const tema = ls.get("br.tema", "escuro");
+    const fid = l.fidelidade || {};
+    const tema = ls.get("bc.tema", "escuro");
     el.innerHTML = `<a class="voltar" href="#/dono/mais">${icone("voltar")} Mais</a>` + titulo("Ajustes") + `
-    ${!S.servicos.length ? `<div class="faixa alerta" style="margin-bottom:16px">${icone("alerta")}<div><strong>Primeira vez aqui?</strong><p>Carregue os serviços (do Booksy), a equipe, os produtos e as fotos com um toque. Depois é só ajustar.</p><button class="btn mini" id="seed2" style="margin-top:10px">Carregar dados iniciais</button></div></div>` : ""}
+    ${!S.servicos.length ? `<div class="faixa alerta" style="margin-bottom:16px">${icone("alerta")}<div><strong>Primeira vez aqui?</strong><p>Carregue os serviços, a equipe, os produtos e as fotos com um toque. Depois é só ajustar.</p><button class="btn mini" id="seed2" style="margin-top:10px">Carregar dados iniciais</button></div></div>` : ""}
     <form id="fl" class="card">
       <h3 style="margin-bottom:12px">Dados da barbearia</h3>
       <label class="campo"><span>Nome</span><input id="ln" maxlength="60" value="${esc(l.nome || "")}"></label>
@@ -29,17 +31,24 @@ export function tela(el) {
       <div class="linha2 quebra">
         <label class="campo"><span>Horários começam a cada</span><select id="ri">${[15, 20, 30, 60].map(v => `<option value="${v}" ${Number(l.intervalo || 30) === v ? "selected" : ""}>${v} minutos</option>`).join("")}</select></label>
         <label class="campo"><span>Antecedência mínima</span><select id="ra">${[0, 15, 30, 60, 120, 240].map(v => `<option value="${v}" ${Number(l.antecedenciaMin ?? 30) === v ? "selected" : ""}>${v ? (v < 60 ? v + " min" : v / 60 + " h") : "nenhuma"}</option>`).join("")}</select></label>
-        <label class="campo"><span>Cliente cancela sozinho até</span><select id="rc">${[0, 1, 2, 3, 6, 12, 24].map(v => `<option value="${v}" ${Number(l.cancelarAteHoras ?? 2) === v ? "selected" : ""}>${v ? v + " h antes" : "a qualquer momento"}</option>`).join("")}</select></label>
+        <label class="campo"><span>Cliente cancela sozinho até</span><select id="rc">${[...new Set([0, 30, 60, 90, 120, 180, 360, 720, 1440, cancelarAteMin(l)])].sort((a, b) => a - b).map(v => `<option value="${v}" ${cancelarAteMin(l) === v ? "selected" : ""}>${textoPrazo(v)}</option>`).join("")}</select></label>
+        <label class="campo"><span>Lembrar o cliente do horário</span><select id="rl">${[0, 60, 120, 180, 240].map(v => `<option value="${v}" ${lembreteMin(l) === v ? "selected" : ""}>${v ? v / 60 + " h antes" : "não lembrar"}</option>`).join("")}</select></label>
         <label class="campo"><span>Agenda aberta para</span><select id="rd">${[7, 14, 30, 60, 90].map(v => `<option value="${v}" ${Number(l.diasAFrente || 30) === v ? "selected" : ""}>${v} dias à frente</option>`).join("")}</select></label>
       </div>
       <label class="campo"><span>Mensagem de aniversário (aparece para o cliente no dia)</span><input id="rm" maxlength="160" value="${esc(l.cupomAniversario || "")}"></label>
+      <h3 style="margin:18px 0 12px">Cartão fidelidade</h3>
+      <label class="check" style="margin-bottom:12px"><input type="checkbox" id="fa" ${fid.ativo ? "checked" : ""}><span>Ligar o cartão fidelidade<br><span class="muted pequeno">Cada atendimento concluído vale um selo. Ao completar, o cliente ganha o prêmio e o barbeiro dá baixa na hora de receber.</span></span></label>
+      <div class="linha2 quebra">
+        <label class="campo"><span>Selos para ganhar o prêmio</span><input id="fc" inputmode="numeric" maxlength="2" value="${esc(fid.cortes || 10)}"></label>
+        <label class="campo"><span>Prêmio</span><input id="fp" maxlength="60" value="${esc(fid.premio || "1 corte grátis")}"></label>
+      </div>
       <div class="botoes"><button class="btn" type="submit">Salvar ajustes</button></div>
     </form>
 
     <section class="card" style="margin-top:14px">
       <h3>Quem acessa o painel</h3>
-      <p class="muted pequeno" style="margin:4px 0 12px">E-mails Google que entram como dono/equipe. O dono principal fica fixo nas regras do Firebase.</p>
-      <div id="adms">${admins.map((e, i) => `<div class="item" style="padding:8px 0;min-height:0"><div class="meio"><strong>${esc(e)}</strong></div><button class="icone-btn" data-rm="${i}" aria-label="Remover">${icone("x")}</button></div>`).join("") || `<p class="muted pequeno">Ninguém além do dono principal.</p>`}</div>
+      <p class="muted pequeno" style="margin:4px 0 12px">E-mails Google que entram como <b>dono</b>, com acesso total (gerente, sócio). Os donos principais ficam fixos nas regras do Firebase e não aparecem aqui. Barbeiros não entram nesta lista: cadastre cada um em <a href="#/dono/equipe">Equipe</a> e escolha lá o que ele pode ver.</p>
+      <div id="adms">${admins.map((e, i) => `<div class="item" style="padding:8px 0;min-height:0"><div class="meio"><strong>${esc(e)}</strong></div><button class="icone-btn" data-rm="${i}" aria-label="Remover">${icone("x")}</button></div>`).join("") || `<p class="muted pequeno">Ninguém além dos donos principais.</p>`}</div>
       <div style="display:flex;gap:8px;margin-top:8px"><input id="novoAdm" type="email" placeholder="email@gmail.com"><button class="btn mini" id="addAdm">Adicionar</button></div>
     </section>
 
@@ -55,7 +64,7 @@ export function tela(el) {
         <button class="btn sec" id="seed">${icone("subir")} Carregar dados iniciais</button>
         ${D.modo === "demo" ? `<button class="btn fantasma" id="zerar">${icone("repetir")} Recomeçar demonstração</button>` : ""}
       </div>
-      <p class="muted pequeno" style="margin-top:10px">“Carregar dados iniciais” adiciona os serviços e preços do Booksy, a equipe (Arlley e Miguel), produtos de exemplo e as fotos. Não apaga clientes nem agendamentos.</p>
+      <p class="muted pequeno" style="margin-top:10px">“Carregar dados iniciais” adiciona os serviços (preços de exemplo), a equipe, produtos de exemplo e as fotos do Instagram. Não apaga clientes nem agendamentos.</p>
     </section>
     <p class="centro" style="margin-top:20px"><button class="btn fantasma mini" id="sair">${icone("sair")} Sair da conta</button></p>
     <p class="centro fraco pequeno" style="margin-top:8px">Barbearia Rodrigues · app v${VERSAO} · ${D.modo === "demo" ? "modo demonstração" : "Firebase"}</p>`;
@@ -81,8 +90,9 @@ export function tela(el) {
     const dados = {
       nome: v("ln") || "Barbearia Rodrigues", slogan: v("ls"), sobre: v("lb"), endereco: v("le"), cidade: v("lc"),
       whatsapp: soDigitos(v("lw")), instagram: v("li").replace(/^@/, ""), horario: h.horario,
-      intervalo: Number(v("ri")), antecedenciaMin: Number(v("ra")), cancelarAteHoras: Number(v("rc")), diasAFrente: Number(v("rd")),
-      cupomAniversario: v("rm"), atualizadoEm: Date.now()
+      intervalo: Number(v("ri")), antecedenciaMin: Number(v("ra")), cancelarAteMin: Number(v("rc")), lembreteMin: Number(v("rl")), diasAFrente: Number(v("rd")),
+      cupomAniversario: v("rm"), atualizadoEm: Date.now(),
+      fidelidade: { ativo: f.querySelector("#fa").checked, cortes: Math.min(50, Math.max(1, Math.floor(Number(v("fc")) || 10))), premio: v("fp") || "1 corte grátis" }
     };
     try { await D.salvar("config", "loja", dados); toast("Ajustes salvos!", "ok"); } catch (x) { toast(traduzErro(x), "erro"); }
   }
@@ -108,7 +118,7 @@ export function tela(el) {
     c.profissionais.filter(p => !np.has(p.nome.toLowerCase())).forEach(p => ops.push({ tipo: "salvar", c: "profissionais", id: D.novoId(), dados: p }));
     c.produtos.filter(p => !npr.has(p.nome.toLowerCase())).forEach(p => {
       const id = D.novoId(), { custo, quantidade, minimo, ...pub } = p;
-      ops.push({ tipo: "salvar", c: "produtos", id, dados: { ...pub, foto: "", ativo: true, disponivel: quantidade > 0 } });
+      ops.push({ tipo: "salvar", c: "produtos", id, dados: { ...pub, foto: pub.foto || "", ativo: true, disponivel: quantidade > 0 } });
       ops.push({ tipo: "salvar", c: "estoque", id, dados: { custo, quantidade, minimo, atualizadoEm: Date.now() } });
     });
     c.galeria.filter(g => !ng.has(g.foto)).forEach(g => ops.push({ tipo: "salvar", c: "galeria", id: D.novoId(), dados: g }));
@@ -121,7 +131,7 @@ export function tela(el) {
   }
 
   async function backup() {
-    const cols = ["clientes", "fichas", "agendamentos", "pedidos", "produtos", "estoque", "movimentos", "servicos", "profissionais", "galeria", "avisos", "avaliacoes"];
+    const cols = ["clientes", "fichas", "agendamentos", "pedidos", "produtos", "estoque", "movimentos", "servicos", "profissionais", "equipe", "acessos", "caixa", "comissoes", "espera", "galeria", "avisos", "avaliacoes"];
     const out = { app: "Barbearia Rodrigues", versao: VERSAO, geradoEm: new Date().toISOString(), config: { loja: S.loja } };
     try {
       for (const c of cols) out[c] = await D.listar(c);

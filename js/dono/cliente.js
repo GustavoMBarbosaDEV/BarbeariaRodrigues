@@ -5,6 +5,8 @@ import { STATUS } from "../agenda.js";
 import { STATUS_PEDIDO } from "../cliente/carrinho.js";
 import { N } from "../notificacoes.js";
 import { ir } from "../app.js";
+import { S } from "../estado.js";
+import { fidelidade } from "../caixa.js";
 
 export function tela(el, rota) {
   const id = rota.param;
@@ -20,8 +22,9 @@ export function tela(el, rota) {
     const serv = {}; feitos.forEach(a => (a.servicos || []).forEach(s => serv[s.nome] = (serv[s.nome] || 0) + 1));
     const preferido = Object.entries(serv).sort((a, b) => b[1] - a[1])[0];
     const aniv = c.nascimento && c.nascimento.slice(5) === hoje().slice(5);
+    const fid = fidelidade(S.loja, ags);
     el.innerHTML = `<a class="voltar" href="#/dono/clientes">${icone("voltar")} Clientes</a>
-      <div class="perfil-topo">${avatar(c.nome, "", "g")}<div style="min-width:0"><h1>${esc(c.nome)}</h1><p class="muted pequeno">${c.manual ? "Cadastrado no balcão" : "Usa o app"} · desde ${dataCurta(new Date(c.criadoEm || Date.now()).toISOString().slice(0, 10))}</p>${aniv ? `<span class="pill ouro" style="margin-top:6px">🎂 Aniversário hoje</span>` : ""}</div></div>
+      <div class="perfil-topo">${avatar(c.nome, "", "g")}<div style="min-width:0"><h1>${esc(c.nome)}</h1><p class="muted pequeno">${c.manual ? "Cadastrado no balcão" : "Usa o app"} · desde ${dataCurta(new Date(c.criadoEm || Date.now()).toISOString().slice(0, 10))}</p>${aniv ? `<span class="pill destaque" style="margin-top:6px">🎂 Aniversário hoje</span>` : ""}</div></div>
       <div class="botoes" style="margin-bottom:16px">
         ${c.telefone ? `<a class="btn whats mini" target="_blank" rel="noopener" href="${linkWhats(c.telefone, `Olá, ${c.nome.split(" ")[0]}!`)}">${icone("whats")} WhatsApp</a>` : ""}
         ${!c.manual ? `<button class="btn sec mini" id="msg">${icone("sino")} Mensagem no app</button>` : ""}
@@ -29,7 +32,7 @@ export function tela(el, rota) {
       </div>
       <div class="kpis">
         <div class="kpi"><small>Visitas</small><b>${feitos.length}</b></div>
-        <div class="kpi ouro"><small>Total gasto</small><b>${reais(gasto)}</b></div>
+        <div class="kpi destaque"><small>Total gasto</small><b>${reais(gasto)}</b></div>
         <div class="kpi"><small>Ticket médio</small><b>${reais(feitos.length ? feitos.reduce((s, a) => s + a.total, 0) / feitos.length : 0)}</b></div>
         <div class="kpi"><small>Faltas</small><b>${faltas}</b></div>
       </div>
@@ -39,23 +42,24 @@ export function tela(el, rota) {
         <div class="config-item"><div class="meio"><small>Celular</small><strong>${c.telefone ? esc(foneFormata(c.telefone)) : "—"}</strong></div></div>
         <div class="config-item"><div class="meio"><small>E-mail</small><strong>${esc(c.email || "—")}</strong></div></div>
         ${preferido ? `<div class="config-item"><div class="meio"><small>Serviço preferido</small><strong>${esc(preferido[0])} (${preferido[1]}×)</strong></div></div>` : ""}
+        ${fid ? `<div class="config-item"><div class="meio"><small>Cartão fidelidade</small><strong>${fid.disponiveis ? `Prêmio disponível: ${esc(fid.premio)}` : `${fid.selos} de ${fid.cortes} selos · faltam ${fid.falta}`}</strong></div></div>` : ""}
       </div></section>
       <section class="secao"><div class="secao-topo"><h2>Anotações internas</h2><span class="muted pequeno">só a equipe vê</span></div>
-        <textarea id="notas" placeholder="Ex.: máquina 1 nas laterais, prefere o Arlley, alergia a tal produto…">${esc(ficha.notas || "")}</textarea>
+        <textarea id="notas" placeholder="Ex.: máquina 1 nas laterais, prefere fade baixo, alergia a tal produto…">${esc(ficha.notas || "")}</textarea>
         <div class="botoes" style="margin-top:8px"><button class="btn mini sec" id="salvaNotas" style="flex:0 0 auto">Salvar anotação</button></div>
       </section>
       <section class="secao"><div class="secao-topo"><h2>Histórico</h2></div>
         ${ags.length ? `<div class="lista">${ags.sort((a, b) => (b.data + b.inicio).localeCompare(a.data + a.inicio)).map(a => `<div class="item"><div class="meio"><strong>${esc((a.servicos || []).map(s => s.nome).join(" + "))}</strong><small>${esc(quando(a.data))} ${a.inicio} · ${esc(a.profissionalNome)}</small></div><div class="lado"><span class="preco">${reais(a.total)}</span><span class="pill ${STATUS[a.status]?.c}">${STATUS[a.status]?.t}</span></div></div>`).join("")}</div>` : `<p class="muted">Nenhum agendamento ainda.</p>`}
       </section>
       ${peds.length ? `<section class="secao"><div class="secao-topo"><h2>Compras no shop</h2></div><div class="lista">${peds.map(p => `<div class="item"><div class="meio"><strong>${esc(p.itens.map(i => `${i.qtd}× ${i.nome}`).join(", "))}</strong><small>${tempoAtras(p.criadoEm)}</small></div><div class="lado"><span class="preco">${reais(p.total)}</span><span class="pill ${STATUS_PEDIDO[p.status]?.c}">${STATUS_PEDIDO[p.status]?.t}</span></div></div>`).join("")}</div></section>` : ""}
-      <p class="centro" style="margin-top:24px"><button class="btn fantasma mini" id="apagar">${icone("lixo")} Apagar cliente</button></p>`;
+      ${D.ehDono ? `<p class="centro" style="margin-top:24px"><button class="btn fantasma mini" id="apagar">${icone("lixo")} Apagar cliente</button></p>` : ""}`;
 
     el.querySelector("#salvaNotas").addEventListener("click", async () => {
       try { await D.salvar("fichas", id, { notas: el.querySelector("#notas").value.slice(0, 2000), atualizadoEm: Date.now() }); toast("Anotação salva.", "ok"); } catch (e) { toast(traduzErro(e), "erro"); }
     });
     el.querySelector("#msg")?.addEventListener("click", mensagem);
     el.querySelector("#editar").addEventListener("click", editar);
-    el.querySelector("#apagar").addEventListener("click", apagar);
+    el.querySelector("#apagar")?.addEventListener("click", apagar);
   };
 
   function mensagem() {
@@ -101,7 +105,7 @@ export function tela(el, rota) {
   paradas.push(D.ouvirDoc("clientes", id, d => { c = d; carregado = true; desenha(); }, () => { carregado = true; desenha(); }));
   paradas.push(D.ouvirDoc("fichas", id, d => { ficha = d || {}; if (!el.querySelector("#notas:focus")) desenha(); }));
   paradas.push(D.ouvir("agendamentos", [["uid", "==", id]], l => { ags = l; desenha(); }));
-  paradas.push(D.ouvir("pedidos", [["uid", "==", id]], l => { peds = l.sort((a, b) => b.criadoEm - a.criadoEm); desenha(); }));
+  if (D.pode("pedidos")) paradas.push(D.ouvir("pedidos", [["uid", "==", id]], l => { peds = l.sort((a, b) => b.criadoEm - a.criadoEm); desenha(); }));
   desenha();
   return () => paradas.forEach(f => f());
 }

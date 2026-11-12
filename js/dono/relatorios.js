@@ -57,7 +57,7 @@ export function tela(el) {
     el.innerHTML = `<a class="voltar" href="#/dono/mais">${icone("voltar")} Mais</a>` + titulo("Relatórios", `${dataCurta(ini)}${ini !== fim ? " a " + dataCurta(fim) : ""} · só atendimentos concluídos entram no faturamento`) + `
       <div class="seg" style="margin-bottom:14px">${[["hoje", "Hoje"], ["7d", "7 dias"], ["mes", "Este mês"], ["mesp", "Mês passado"], ["ano", "Ano"]].map(([v, t]) => `<button class="${periodo === v ? "ativo" : ""}" data-p="${v}">${t}</button>`).join("")}</div>
       <div class="kpis">
-        <div class="kpi ouro"><small>Faturamento</small><b>${reais(fatServ + fatProd)}</b><i>serviços ${reais(fatServ)} · shop ${reais(fatProd)}</i></div>
+        <div class="kpi destaque"><small>Faturamento</small><b>${reais(fatServ + fatProd)}</b><i>serviços ${reais(fatServ)} · shop ${reais(fatProd)}</i></div>
         <div class="kpi"><small>Atendimentos</small><b>${feitos.length}</b><i>${unicos} clientes</i></div>
         <div class="kpi"><small>Ticket médio</small><b>${reais(feitos.length ? fatServ / feitos.length : 0)}</b></div>
         <div class="kpi"><small>Faltas / cancel.</small><b>${faltas} / ${canc}</b><i>${novos} clientes novos</i></div>

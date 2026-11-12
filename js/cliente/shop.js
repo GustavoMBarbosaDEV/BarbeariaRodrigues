@@ -9,7 +9,7 @@ export function addCarrinho(id, qtd = 1) {
   const i = S.carrinho.find(x => x.id === id);
   if (i) i.qtd += qtd; else S.carrinho.push({ id, qtd });
   S.carrinho = S.carrinho.filter(x => x.qtd > 0);
-  ls.set("br.carrinho", S.carrinho);
+  ls.set("bc.carrinho", S.carrinho);
   N.atualizaBadges();
   S.avisar("carrinho");
 }

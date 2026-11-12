@@ -13,6 +13,7 @@ export function tela(el) {
       ${demo ? `
         <button class="btn bloco" data-demo="cliente">${icone("usuario")} Entrar como cliente</button>
         <button class="btn sec bloco" data-demo="dono">${icone("grafico")} Entrar como dono</button>
+        <button class="btn sec bloco" data-demo="barbeiro">${icone("tesoura")} Entrar como barbeiro</button>
         <p class="demo-aviso">Modo demonstração: o Firebase ainda não foi configurado, então os dados ficam só neste aparelho. Veja o DESENVOLVIMENTO.md para ligar o login de verdade.</p>`
       : `<button class="btn google bloco" id="google">${LOGO_GOOGLE} Continuar com Google</button>
         <p class="muted pequeno">Usamos sua conta Google só para identificar você. Ao entrar, você concorda com a <a href="#/privacidade">Política de Privacidade</a>.</p>`}

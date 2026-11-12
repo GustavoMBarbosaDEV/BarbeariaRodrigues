@@ -41,7 +41,7 @@ export function tela(el) {
         ${avatar(c.nome, "")}
         <div class="meio"><strong>${esc(c.nome)}</strong><small>${c.telefone ? esc(foneFormata(c.telefone)) + " · " : ""}${cpfOculto(c.cpf)}${filtro === "aniv" && c.nascimento ? ` · 🎂 ${dataCurta(c.nascimento).slice(0, 5)}` : ""}</small>
           <small>${s.visitas ? `${s.visitas} ${s.visitas === 1 ? "visita" : "visitas"} · última ${dataCurta(s.ultima)}` : "Sem visitas concluídas"}${s.proxima ? ` · próxima ${dataCurta(s.proxima)}` : ""}</small></div>
-        <div class="lado">${s.gasto ? `<span class="preco">${reais(s.gasto)}</span>` : ""}${c.manual ? `<span class="pill">balcão</span>` : `<span class="pill ouro">app</span>`}</div></a>`; }).join("")}</div>`
+        <div class="lado">${s.gasto ? `<span class="preco">${reais(s.gasto)}</span>` : ""}${c.manual ? `<span class="pill">balcão</span>` : `<span class="pill destaque">app</span>`}</div></a>`; }).join("")}</div>`
         : vazio("usuarios", busca ? "Ninguém encontrado" : "Nenhum cliente aqui", busca ? "Confira o nome ou os números." : "")}`;
     const ib = el.querySelector("#busca");
     ib.addEventListener("input", debounce(e => { busca = e.target.value; const p = ib.selectionStart; desenha(); const n = el.querySelector("#busca"); n.focus(); n.setSelectionRange(p, p); }, 200));

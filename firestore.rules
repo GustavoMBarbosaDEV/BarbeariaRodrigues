@@ -1,11 +1,20 @@
 rules_version = '2';
 // =====================================================================
 //  Regras de segurança — Barbearia Rodrigues
-//  Cole este arquivo inteiro em: Firebase → Firestore Database → Regras → Publicar.
+//  Publicar com: firebase deploy --only firestore:rules   (ou colar em Firestore → Regras → Publicar)
 //
-//  ANTES DE PUBLICAR: troque EMAIL_DO_DONO@gmail.com (linha marcada com >>>)
-//  pelo e-mail Google do dono da barbearia. Outras pessoas da equipe podem ser
-//  adicionadas depois pelo app, em Mais → Ajustes → Quem acessa o painel.
+//  ANTES DE PUBLICAR: troque os dois e-mails da linha marcada com >>> pelos
+//  e-mails Google dos DONOS PRINCIPAIS (o dono da barbearia e quem cuida do app).
+//
+//  Quem é quem:
+//   - Dono:     os e-mails fixos abaixo + os que o dono adicionar em Ajustes → Quem acessa o painel
+//               (config/admins). Pode tudo.
+//   - Barbeiro: tem um documento acessos/<e-mail> criado pelo dono em Mais → Equipe. Vê a agenda,
+//               mexe nos próprios horários e só faz o resto que o dono liberou (perm).
+//   - Cliente:  qualquer outra conta. Só vê e altera o que é dele.
+//
+//  O app esconde telas de quem não pode, mas isso é só conforto: quem protege os dados é este arquivo.
+//  Testes: pasta testes-regras/ (rodam no GitHub a cada mudança daqui).
 // =====================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -13,13 +22,21 @@ service cloud.firestore {
     // ---------- quem é quem ----------
     function logado() { return request.auth != null; }
     function verificado() { return logado() && request.auth.token.email_verified == true; }
-    // >>> TROQUE pelo e-mail do dono <<<
-    function donoPrincipal() { return verificado() && request.auth.token.email == "EMAIL_DO_DONO@gmail.com"; }
+    function meuEmail() { return request.auth.token.email; }
+    // >>> TROQUE pelos e-mails dos donos principais <<<
+    function donoPrincipal() { return verificado() && meuEmail() in ["EMAIL_DO_DONO@gmail.com", "EMAIL_DE_QUEM_CUIDA_DO_APP@gmail.com"]; }
     function caminhoAdmins() { return /databases/$(database)/documents/config/admins; }
     function admin() {
       return donoPrincipal()
-        || (verificado() && exists(caminhoAdmins()) && request.auth.token.email in get(caminhoAdmins()).data.emails);
+        || (verificado() && exists(caminhoAdmins()) && meuEmail() in get(caminhoAdmins()).data.emails);
     }
+    function caminhoAcesso() { return /databases/$(database)/documents/acessos/$(meuEmail()); }
+    function barbeiro() { return verificado() && exists(caminhoAcesso()); }
+    function acesso() { return get(caminhoAcesso()).data; }
+    function meuProf() { return acesso().prof; }
+    function equipe() { return admin() || barbeiro(); }
+    // o dono pode tudo; o barbeiro, só o que o dono ligou em acessos/<e-mail>.perm
+    function pode(p) { return admin() || (barbeiro() && acesso().get('perm', {}).get(p, false) == true); }
     function eu(uid) { return logado() && request.auth.uid == uid; }
     function dono_do_doc() { return logado() && resource.data.uid == request.auth.uid; }
 
@@ -27,6 +44,9 @@ service cloud.firestore {
     function texto(v, max) { return v is string && v.size() <= max; }
     function dataISO(v) { return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'); }
     function hora(v) { return v is string && v.matches('^[0-2][0-9]:[0-5][0-9]$'); }
+    function dinheiro(v) { return v is number && v >= 0 && v <= 100000; }
+    // id criado por cliente: só letras, números, _ e - (o id aparece no HTML do painel; assim não carrega código)
+    function idSimples(id) { return id.matches('^[A-Za-z0-9_-]{1,64}$'); }
     function mudouSo(campos) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(campos); }
 
     // ---------- dados públicos (qualquer um vê; só o dono altera) ----------
@@ -34,14 +54,34 @@ service cloud.firestore {
     match /config/admins { allow read, write: if admin(); }
     match /servicos/{id} { allow read: if true; allow write: if admin(); }
     match /profissionais/{id} { allow read: if true; allow write: if admin(); }
-    match /produtos/{id} { allow read: if true; allow write: if admin(); }
     match /galeria/{id} { allow read: if true; allow write: if admin(); }
     match /avisos/{id} { allow read: if true; allow write: if admin(); }
+    match /produtos/{id} { allow read: if true; allow write: if pode('estoque'); }
 
-    // ---------- só o dono ----------
-    match /estoque/{id} { allow read, write: if admin(); }        // quantidade e custo
-    match /movimentos/{id} { allow read, write: if admin(); }     // entradas e saídas do estoque
-    match /fichas/{id} { allow read, write: if admin(); }         // anotações internas sobre o cliente
+    // ---------- equipe: conta de acesso e comissão de cada barbeiro ----------
+    // equipe/<profissional> = { email, comissao }: só o dono e o próprio barbeiro leem.
+    match /equipe/{prof} {
+      allow read: if admin() || (verificado() && resource.data.email == meuEmail());
+      allow write: if admin()
+        && (request.method == 'delete' || (request.resource.data.keys().hasOnly(['email', 'comissao'])
+          && texto(request.resource.data.email, 120)
+          && request.resource.data.comissao is number && request.resource.data.comissao >= 0 && request.resource.data.comissao <= 100));
+    }
+    // acessos/<e-mail> = { prof, perm }: é o que decide se a conta é de barbeiro. Só o dono cria, muda e apaga.
+    match /acessos/{email} {
+      allow get: if admin() || (verificado() && email == meuEmail());
+      allow list: if admin();
+      allow write: if admin()
+        && (request.method == 'delete' || (request.resource.data.keys().hasOnly(['prof', 'perm'])
+          && texto(request.resource.data.prof, 60)
+          && request.resource.data.perm is map
+          && request.resource.data.perm.keys().hasOnly(['agendaTodos', 'clientes', 'caixa', 'caixaGeral', 'estoque', 'pedidos', 'relatorios'])));
+    }
+
+    // ---------- estoque ----------
+    match /estoque/{id} { allow read, write: if pode('estoque') || pode('pedidos'); }       // quantidade e custo (entregar um pedido dá baixa)
+    match /movimentos/{id} { allow read, write: if pode('estoque') || pode('pedidos'); }    // entradas e saídas do estoque
+    match /fichas/{id} { allow read, write: if pode('clientes'); }                          // anotações internas sobre o cliente
 
     // ---------- cadastro do cliente (nome completo, CPF, nascimento) ----------
     function clienteValido(d) {
@@ -53,19 +93,25 @@ service cloud.firestore {
         && texto(d.email, 200)
         && d.aceite == true;
     }
+    // cadastro rápido feito no balcão por quem atende (cliente sem conta no app)
+    function clienteBalcao(d) {
+      return d.keys().hasOnly(['nome', 'cpf', 'nascimento', 'telefone', 'email', 'manual', 'aceite', 'criadoEm'])
+        && d.manual == true && texto(d.nome, 120) && texto(d.cpf, 11) && texto(d.nascimento, 10) && texto(d.telefone, 11) && texto(d.email, 200);
+    }
     match /clientes/{uid} {
-      allow read: if eu(uid) || admin();
-      allow create, update: if admin() || (eu(uid) && clienteValido(request.resource.data));
+      allow read: if eu(uid) || pode('clientes') || pode('relatorios');
+      allow create: if (eu(uid) && clienteValido(request.resource.data)) || admin() || (barbeiro() && clienteBalcao(request.resource.data));
+      allow update: if (eu(uid) && clienteValido(request.resource.data)) || pode('clientes');
       allow delete: if eu(uid) || admin();
     }
 
     // CPF único: o documento cpfs/{cpf} diz de quem é o CPF. Ninguém lista nem lê o dos outros.
     match /cpfs/{cpf} {
-      allow get: if admin() || dono_do_doc();
-      allow create: if cpf.matches('^[0-9]{11}$') && request.resource.data.keys().hasOnly(['uid'])
-        && (admin() || (logado() && request.resource.data.uid == request.auth.uid));
-      allow update: if admin() || (dono_do_doc() && request.resource.data.uid == request.auth.uid);
-      allow delete: if admin() || dono_do_doc();
+      allow get: if dono_do_doc() || admin();
+      allow create: if cpf.matches('^[0-9]{11}$') && request.resource.data.keys().hasOnly(['uid']) && texto(request.resource.data.uid, 128)
+        && ((logado() && request.resource.data.uid == request.auth.uid) || equipe());
+      allow update: if (dono_do_doc() && request.resource.data.uid == request.auth.uid) || admin();
+      allow delete: if dono_do_doc() || pode('clientes');
     }
 
     // ---------- agendamentos ----------
@@ -75,18 +121,42 @@ service cloud.firestore {
         && d.uid == request.auth.uid && d.status == 'marcado'
         && d.servicos is list && d.servicos.size() > 0 && d.servicos.size() <= 10
         && d.duracao is number && d.duracao > 0 && d.duracao <= 600
-        && d.total is number && dataISO(d.data) && hora(d.inicio)
-        && texto(d.profissional, 60) && texto(d.clienteNome, 120) && texto(d.obs, 300);
+        && dinheiro(d.total) && dataISO(d.data) && hora(d.inicio)
+        && texto(d.profissional, 60) && texto(d.clienteNome, 120) && texto(d.obs, 300) && texto(d.origem, 12);
+    }
+    // O barbeiro mexe nos próprios horários (ou nos de todos, se o dono liberou) e não troca o horário de dono.
+    function barbeiroPodeMexer() {
+      return barbeiro() && (resource.data.profissional == meuProf() || pode('agendaTodos'))
+        && request.resource.data.profissional == resource.data.profissional;
     }
     match /agendamentos/{id} {
-      allow read: if admin() || dono_do_doc();
-      allow create: if admin() || (logado() && agValido(request.resource.data));
-      // o cliente só pode CANCELAR o próprio horário (marcado ou confirmado)
-      allow update: if admin() || (dono_do_doc()
-        && resource.data.status in ['marcado', 'confirmado']
-        && request.resource.data.status == 'cancelado'
-        && mudouSo(['status', 'atualizadoEm', 'canceladoPor', 'remarcadoPara']));
+      allow read: if dono_do_doc() || equipe();
+      allow create: if (logado() && idSimples(id) && agValido(request.resource.data)) || equipe();
+      allow update: if
+        // o cliente só pode CANCELAR o próprio horário (marcado ou confirmado)
+        (dono_do_doc()
+          && resource.data.status in ['marcado', 'confirmado']
+          && request.resource.data.status == 'cancelado'
+          && mudouSo(['status', 'atualizadoEm', 'canceladoPor', 'remarcadoPara']))
+        || admin()
+        || barbeiroPodeMexer();
       allow delete: if admin();
+    }
+
+    // ---------- comissão de cada atendimento concluído: comissoes/<id do agendamento> ----------
+    // Fica fora do agendamento porque o cliente lê o próprio agendamento e não deve ver quanto o barbeiro ganha.
+    // O barbeiro só lança a própria, e a % tem de ser a que o dono definiu em equipe/<profissional>.
+    match /comissoes/{agId} {
+      allow read: if pode('caixaGeral') || (barbeiro() && resource.data.profissional == meuProf());
+      allow create, update: if request.resource.data.keys().hasOnly(['profissional', 'data', 'base', 'pct', 'valor', 'em'])
+        && texto(request.resource.data.profissional, 60) && dataISO(request.resource.data.data)
+        && dinheiro(request.resource.data.base) && dinheiro(request.resource.data.valor)
+        && request.resource.data.pct is number && request.resource.data.pct >= 0 && request.resource.data.pct <= 100
+        && request.resource.data.valor <= request.resource.data.base
+        && (admin() || (barbeiro() && request.resource.data.profissional == meuProf()
+              && request.resource.data.pct == get(/databases/$(database)/documents/equipe/$(meuProf())).data.comissao
+              && get(/databases/$(database)/documents/agendamentos/$(agId)).data.profissional == meuProf()));
+      allow delete: if admin() || (barbeiro() && resource.data.profissional == meuProf());
     }
 
     // Blocos de 15 min ocupados: <profissional>_<data>_<HHMM>.
@@ -94,25 +164,59 @@ service cloud.firestore {
     match /bloqueios/{id} {
       allow read: if logado();
       allow create: if id == request.resource.data.profissional + '_' + request.resource.data.data + '_' + request.resource.data.hora
-        && (admin() || (logado()
-          && request.resource.data.keys().hasOnly(['profissional', 'data', 'hora', 'uid', 'ag'])
-          && request.resource.data.uid == request.auth.uid
-          && request.resource.data.ag is string
-          && getAfter(/databases/$(database)/documents/agendamentos/$(request.resource.data.ag)).data.uid == request.auth.uid));
+        && ((logado()
+            && request.resource.data.keys().hasOnly(['profissional', 'data', 'hora', 'uid', 'ag'])
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.ag is string
+            && getAfter(/databases/$(database)/documents/agendamentos/$(request.resource.data.ag)).data.uid == request.auth.uid)
+          || equipe());
       allow update: if false;
-      allow delete: if admin() || dono_do_doc();
+      allow delete: if dono_do_doc() || equipe();
+    }
+
+    // ---------- lista de espera: espera/<uid>_<data>_<HHMM> ----------
+    function esperaValida(d, id) {
+      return d.keys().hasOnly(['uid', 'clienteNome', 'clienteTelefone', 'data', 'hora', 'profissional', 'servicos', 'duracao', 'push', 'criadoEm'])
+        && d.uid == request.auth.uid && dataISO(d.data) && hora(d.hora)
+        && id == d.uid + '_' + d.data + '_' + d.hora.replace(':', '')
+        && texto(d.clienteNome, 120) && texto(d.clienteTelefone, 11) && texto(d.profissional, 60)
+        && d.servicos is list && d.servicos.size() <= 10
+        && d.duracao is number && d.duracao > 0 && d.duracao <= 600
+        && d.push is bool;
+    }
+    match /espera/{id} {
+      allow read: if dono_do_doc() || equipe();
+      allow create: if logado() && esperaValida(request.resource.data, id);
+      allow update: if (dono_do_doc() && esperaValida(request.resource.data, id)) || (equipe() && mudouSo(['avisadoEm']));
+      allow delete: if dono_do_doc() || equipe();
+    }
+
+    // ---------- caixa: entradas e saídas lançadas à mão ----------
+    match /caixa/{id} {
+      allow read: if pode('caixaGeral') || (pode('caixa') && resource.data.por == request.auth.uid);
+      allow create: if pode('caixa')
+        && request.resource.data.keys().hasOnly(['tipo', 'valor', 'descricao', 'forma', 'data', 'em', 'por', 'porNome', 'profissional'])
+        && request.resource.data.tipo in ['entrada', 'saida']
+        && request.resource.data.valor is number && request.resource.data.valor > 0 && request.resource.data.valor <= 100000
+        && texto(request.resource.data.descricao, 80)
+        && request.resource.data.forma in ['dinheiro', 'pix', 'debito', 'credito']
+        && dataISO(request.resource.data.data)
+        && request.resource.data.por == request.auth.uid
+        && texto(request.resource.data.porNome, 120) && texto(request.resource.data.profissional, 60);
+      allow update: if false;                         // lançou errado? apaga e lança de novo (fica o registro de quem lançou)
+      allow delete: if admin() || (pode('caixa') && resource.data.por == request.auth.uid);
     }
 
     // ---------- reservas do Shop ----------
     match /pedidos/{id} {
-      allow read: if admin() || dono_do_doc();
-      allow create: if logado()
+      allow read: if dono_do_doc() || pode('pedidos') || pode('caixaGeral') || pode('relatorios');
+      allow create: if logado() && idSimples(id)
         && request.resource.data.keys().hasOnly(['uid', 'clienteNome', 'clienteTelefone', 'itens', 'total', 'obs', 'status', 'criadoEm'])
         && request.resource.data.uid == request.auth.uid && request.resource.data.status == 'novo'
         && request.resource.data.itens is list && request.resource.data.itens.size() > 0 && request.resource.data.itens.size() <= 30
-        && request.resource.data.total is number && texto(request.resource.data.obs, 200);
-      allow update: if admin() || (dono_do_doc() && resource.data.status == 'novo'
-        && request.resource.data.status == 'cancelado' && mudouSo(['status', 'atualizadoEm']));
+        && dinheiro(request.resource.data.total) && texto(request.resource.data.obs, 200);
+      allow update: if (dono_do_doc() && resource.data.status == 'novo'
+        && request.resource.data.status == 'cancelado' && mudouSo(['status', 'atualizadoEm'])) || pode('pedidos');
       allow delete: if admin();
     }
 
@@ -127,15 +231,26 @@ service cloud.firestore {
         && texto(request.resource.data.texto, 400) && texto(request.resource.data.nome, 40)
         && get(/databases/$(database)/documents/agendamentos/$(agId)).data.uid == request.auth.uid
         && get(/databases/$(database)/documents/agendamentos/$(agId)).data.status == 'concluido';
-      allow update, delete: if admin() || dono_do_doc();
+      allow update, delete: if dono_do_doc() || admin();
     }
 
     // ---------- notificações de cada cliente ----------
     match /notificacoes/{uid}/itens/{id} {
       allow read: if eu(uid) || admin();
-      allow create: if admin();
-      allow update: if admin() || (eu(uid) && mudouSo(['lida']));
+      allow create: if equipe()
+        && request.resource.data.keys().hasOnly(['titulo', 'texto', 'link', 'em', 'lida'])
+        && texto(request.resource.data.titulo, 80) && texto(request.resource.data.texto, 400) && texto(request.resource.data.link, 160);
+      allow update: if (eu(uid) && mudouSo(['lida'])) || admin();
       allow delete: if eu(uid) || admin();
+    }
+
+    // ---------- endereço do aparelho para aviso com o app fechado ----------
+    // Só a própria pessoa lê e grava. O serviço de avisos lê por fora, com conta de serviço.
+    match /push/{uid} {
+      allow read, delete: if eu(uid);
+      allow create, update: if eu(uid)
+        && request.resource.data.keys().hasOnly(['tokens', 'atualizadoEm'])
+        && request.resource.data.tokens is list && request.resource.data.tokens.size() <= 5;
     }
 
     // Todo o resto fica bloqueado

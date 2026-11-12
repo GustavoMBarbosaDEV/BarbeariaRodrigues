@@ -5,6 +5,30 @@ Ao publicar, atualize `VERSAO` em `js/app.js`, `CACHE` em `sw.js`, escreva aqui 
 
 ---
 
+## 2.0.0 — 12/11/2026 **Mesmas funções e regras do app padrão de barbearia, com a cara da Rodrigues**
+
+O código passou a ser o do app padrão (o mesmo da Barbearia Carmo). O que é só da Rodrigues continua: nome, logo, fotos, serviços e preços do Booksy, equipe (Arlley e Miguel), endereço, horário e as cores preto, couro e dourado.
+
+**O que entrou**
+- Três tipos de conta: dono, barbeiro (com permissões que o dono liga em Equipe) e cliente.
+- Concluir = receber: forma de pagamento, troco e gorjeta em dinheiro.
+- Caixa com fechamento de dia, semana e mês; entradas e saídas avulsas; resumo para WhatsApp ou impressão.
+- Comissão por barbeiro, guardada na hora de concluir.
+- Lista de espera com aviso de vaga, cartão fidelidade (vem desligado), lembrete 2 h antes e cancelamento até 1h30 antes (ajustáveis em Ajustes).
+- Avisos com o app fechado (pasta `avisos-worker/`, ainda não publicado).
+- Segurança: regras do Firestore novas com testes, CSP, fontes e Firebase servidos do próprio site (sem Google Fonts nem gstatic), build por lista fixa e verificações automáticas no GitHub.
+- Abertura e início redesenhados com as fotos e a logo da Rodrigues; temas escuro e claro.
+
+**Padrões colocados (o dono ainda não definiu):** lembrete 2 h, cancelar até 1h30, dinheiro/Pix/débito/crédito, fidelidade desligada (10 atendimentos = 1 corte grátis), comissão 0% até ser definida em Equipe.
+
+**Testado** (modo demonstração, celular 390×844): 17 testes automáticos; todas as telas de cliente, barbeiro e dono, sem erro no console e sem pedido a outro endereço; rota proibida volta para o início (cliente) ou para a agenda (barbeiro); concluir em dinheiro com falta, troco e gorjeta, e o valor aparecendo no Caixa; o build de publicação (`node build.mjs`) monta a pasta `dist/` sem erro.
+
+**Não testado:** Firebase de verdade (login, regras em produção, App Check); regras no emulador; avisos com o app fechado; roteiro completo da lista de espera; tela de computador.
+
+**Pendente:** e-mails dos donos em `firestore.rules`; logo em alta resolução; fotos dos produtos e da equipe.
+
+---
+
 ## 1.0.0 — 19/10/2026 **Primeira versão**
 
 **Cliente**

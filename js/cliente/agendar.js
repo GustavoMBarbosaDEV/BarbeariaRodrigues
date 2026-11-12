@@ -1,11 +1,15 @@
 // =====================================================================
 //  Agendar: 1) serviços  2) profissional  3) dia e hora  4) confirmar
+//  No passo 3 os horários ocupados também aparecem: o cliente pode entrar na
+//  lista de espera de um deles e é avisado se vagar (#/agendar?vaga=<id> abre
+//  direto na confirmação daquele horário).
 // =====================================================================
 import { D, traduzErro } from "../dados.js";
 import { S } from "../estado.js";
 import { esc, icone, reais, duracao, avatar, toast, DIAS_C, MESES, dataDe, dataLonga, min, linkWhats, vazio } from "../util.js";
 import { categorias, precoServ } from "../ui.js";
-import { livres, ocupadosDoDia, reservar, liberar, expediente, fazServico, profsAtivos, diasDisponiveis, arquivoCalendario } from "../agenda.js";
+import { livres, bloqueiosDoDia, conjunto, ocupadosParaEspera, entrarNaEspera, sairDaEspera, idEspera, reservar, liberar, expediente, fazServico, profsAtivos, diasDisponiveis, arquivoCalendario, cancelarAteMin, lembreteMin, textoPrazo } from "../agenda.js";
+import { N } from "../notificacoes.js";
 
 export function tela(el, rota) {
   const q = rota.q;
@@ -15,6 +19,8 @@ export function tela(el, rota) {
     prof: q.get("prof") || "",          // "" = sem preferência
     data: "", hora: "", obs: "",
     remarcar: q.get("remarcar") || "",
+    vaga: q.get("vaga") || "",           // id de um interesse da lista de espera cujo horário vagou
+    daEspera: "", cheios: [], minhas: new Set(),
     antigo: null, feito: null, slots: null, carregando: false
   };
   if (st.sel.length) st.passo = 2;
@@ -69,8 +75,10 @@ export function tela(el, rota) {
       // na primeira abertura, pula para o primeiro dia que ainda tem horário livre
       const dias = diasDisponiveis(Number((S.loja || {}).diasAFrente) || 30);
       for (let i = 0; i < (auto ? 14 : 1); i++) {
-        const oc = await ocupadosDoDia(st.data);
-        st.slots = livres(st.data, candidatos(), durTotal(), oc);
+        const bl = await bloqueiosDoDia(st.data);
+        st.slots = livres(st.data, candidatos(), durTotal(), conjunto(bl));
+        const livresH = new Set(st.slots.map(s => s.hora));
+        st.cheios = ocupadosParaEspera(st.data, candidatos(), durTotal(), bl).filter(h => !livresH.has(h));
         if (st.slots.length || !auto) break;
         const prox = dias.slice(dias.indexOf(st.data) + 1).find(d => candidatos().some(p => expediente(p, d)));
         if (!prox) break;
@@ -90,10 +98,30 @@ export function tela(el, rota) {
       <div class="dias" id="dias">${dias.map(d => { const x = dataDe(d); const ok = abre(d); return `<button class="dia ${d === st.data ? "on" : ""}" data-d="${d}" ${ok ? "" : "disabled"} aria-label="${dataLonga(d)}${ok ? "" : " (fechado)"}"><small>${DIAS_C[x.getDay()]}</small><b>${x.getDate()}</b><i>${ok ? MESES[x.getMonth()].slice(0, 3) : "fechado"}</i></button>`; }).join("")}</div>
       <div id="slots">${st.carregando || !st.slots ? `<div class="carregando"><span></span></div>` :
         st.slots.length ? Object.entries(grupos).filter(([, l]) => l.length).map(([g, l]) => `<div class="periodo">${g}</div><div class="slots">${l.map(s => `<button class="slot ${s.hora === st.hora ? "on" : ""}" data-h="${s.hora}">${s.hora}</button>`).join("")}</div>`).join("")
-          : vazio("relogio", "Sem horários livres neste dia", "Tente outro dia ou outro profissional.")}</div>` + resumo("Continuar", !!st.hora);
+          : vazio("relogio", "Sem horários livres neste dia", st.cheios.length ? "Entre na lista de espera de um horário abaixo, ou tente outro dia." : "Tente outro dia ou outro profissional.")}
+        ${!st.carregando && st.slots && st.cheios.length ? `<div class="espera-bloco">
+          <div class="periodo">Horários ocupados · lista de espera</div>
+          <p class="muted pequeno" style="margin-bottom:8px">Queria um destes? Toque para entrar na lista de espera. Se o horário vagar, você é avisado pelo app e pode marcar.</p>
+          <div class="slots">${st.cheios.map(h => { const on = st.minhas.has(idEspera(D.usuario.uid, st.data, h)); return `<button class="slot espera ${on ? "on" : ""}" data-e="${h}" aria-pressed="${on}" aria-label="${h} ocupado: ${on ? "sair da" : "entrar na"} lista de espera">${icone(on ? "sino" : "relogio")}${h}</button>`; }).join("")}</div>
+        </div>` : ""}</div>` + resumo("Continuar", !!st.hora);
+    el.querySelectorAll("[data-e]").forEach(b => b.addEventListener("click", () => alternaEspera(b.dataset.e)));
     el.querySelectorAll("[data-d]").forEach(b => b.addEventListener("click", () => { st.data = b.dataset.d; st.hora = ""; carregaSlots(); }));
     el.querySelectorAll("[data-h]").forEach(b => b.addEventListener("click", () => { st.hora = b.dataset.h; const y = window.scrollY; desenha(); window.scrollTo(0, y); }));
     const ativo = el.querySelector(".dia.on"); if (ativo) ativo.scrollIntoView({ block: "nearest", inline: "center" });
+  }
+
+  async function alternaEspera(hora) {
+    const id = idEspera(D.usuario.uid, st.data, hora);
+    try {
+      if (st.minhas.has(id)) { await sairDaEspera(id); st.minhas.delete(id); toast("Você saiu da lista de espera desse horário."); }
+      else {
+        if (st.minhas.size >= 10) return toast("Você já está em 10 listas de espera. Saia de alguma em Meus horários.", "erro");
+        await entrarNaEspera({ data: st.data, hora, profissional: st.prof, servicos: st.sel, duracao: durTotal(), push: N.pushLigado() });
+        st.minhas.add(id);
+        toast(`Pronto! Se o horário das ${hora} vagar, a gente te avisa${N.ligadas() ? "" : " aqui no app (ative as notificações no Perfil para receber no celular)"}.`, "ok");
+      }
+    } catch (e) { toast(traduzErro(e), "erro"); }
+    const y = window.scrollY; desenha(); window.scrollTo(0, y);
   }
 
   // ---------- Passo 4: confirmar ----------
@@ -114,7 +142,7 @@ export function tela(el, rota) {
         <div class="total"><span>Total</span><b class="preco">${reais(precoTotal())}</b></div>
       </div>
       <label class="campo" style="margin-top:16px"><span>Observação para o barbeiro (opcional)</span><textarea id="obs" maxlength="300" placeholder="Ex.: quero manter o comprimento em cima">${esc(st.obs)}</textarea></label>
-      <p class="muted pequeno">O pagamento é feito na barbearia. Você pode cancelar pelo app até ${Number(loja.cancelarAteHoras ?? 2)} h antes.</p>
+      <p class="muted pequeno">O pagamento é feito na barbearia. Você pode cancelar pelo app ${cancelarAteMin() ? "até " + textoPrazo(cancelarAteMin()) : "a qualquer momento"}; depois disso, fale com a barbearia.</p>
       <div class="botoes" style="margin-top:16px"><button class="btn bloco" id="confirmar">${icone("check")} Confirmar agendamento</button></div>`;
     el.querySelector("#obs").addEventListener("input", e => st.obs = e.target.value);
     el.querySelector("#confirmar").addEventListener("click", confirmar);
@@ -130,8 +158,10 @@ export function tela(el, rota) {
         clienteNome: (S.perfil && S.perfil.nome) || D.usuario.nome || "",
         clienteTelefone: (S.perfil && S.perfil.telefone) || "",
         servicos: servSel().map(s => ({ id: s.id, nome: s.nome, preco: Number(s.preco), duracao: Number(s.duracao) })),
-        profissional: p.id, data: st.data, inicio: st.hora, obs: st.obs.trim()
+        profissional: p.id, data: st.data, inicio: st.hora, obs: st.obs.trim(), origem: st.daEspera ? "espera" : "app"
       });
+      // marcou: sai da lista de espera desse horário (e do interesse que trouxe até aqui)
+      for (const id of new Set([st.daEspera, idEspera(D.usuario.uid, st.data, st.hora)])) if (id && (id === st.daEspera || st.minhas.has(id))) sairDaEspera(id).catch(() => { });
       if (st.antigo) { try { await liberar(st.antigo, "cancelado", { canceladoPor: "cliente", remarcadoPara: ag.id }); } catch (x) { console.warn(x); } }
       st.feito = ag; desenha();
     } catch (err) {
@@ -152,9 +182,11 @@ export function tela(el, rota) {
         <a class="btn sec bloco" href="#/horarios">Ver meus horários</a>
         ${loja.whatsapp ? `<a class="btn fantasma bloco" target="_blank" rel="noopener" href="${linkWhats(loja.whatsapp, `Olá! Acabei de agendar pelo app: ${dataLonga(ag.data)} às ${ag.inicio} (${ag.servicos.map(s => s.nome).join(" + ")}).`)}">${icone("whats")} Avisar no WhatsApp</a>` : ""}
       </div>
-      <p class="pequeno" style="margin-top:18px">A agenda do celular te lembra 1 dia e 1 hora antes, mesmo com o app fechado.</p>
+      <p class="pequeno" style="margin-top:18px">${lembreteMin() ? `Você recebe um lembrete ${textoPrazo(lembreteMin())}${N.ligadas() ? "" : " aqui no app"}. ` : ""}A agenda do celular também te lembra, mesmo com o app fechado.</p>
+      ${N.suportado() && !N.ligadas() ? `<p style="margin-top:10px"><button class="btn mini sec" id="notif">${icone("sino")} Receber o lembrete no celular</button></p>` : ""}
     </div>`;
     el.querySelector("#cal").addEventListener("click", () => arquivoCalendario(ag));
+    el.querySelector("#notif")?.addEventListener("click", async e => { const ok = await N.ligar(); toast(ok ? "Notificações ligadas." : "O navegador bloqueou as notificações. Libere nas configurações do site.", ok ? "ok" : "erro"); if (ok) e.currentTarget.closest("p").remove(); });
   }
 
   function desenha() {
@@ -173,6 +205,20 @@ export function tela(el, rota) {
     if (st.remarcar) {
       const a = await D.pegar("agendamentos", st.remarcar).catch(() => null);
       if (a && a.uid === D.usuario.uid) { st.antigo = a; st.sel = (a.servicos || []).map(s => s.id).filter(id => S.servico(id) || !S.servicos.length); st.prof = a.profissional; st.passo = st.sel.length ? 3 : 1; }
+    }
+    D.listar("espera", [["uid", "==", D.usuario.uid]]).then(l => { st.minhas = new Set(l.map(e => e.id)); if (st.passo === 3 && !st.feito) desenha(); }).catch(() => { });
+    if (st.vaga) {
+      // veio do aviso "abriu o horário que você queria": se ainda está livre, cai direto na confirmação
+      const e = await D.pegar("espera", st.vaga).catch(() => null);
+      if (e && e.uid === D.usuario.uid && e.data >= diasDisponiveis(1)[0]) {
+        st.sel = (e.servicos || []).filter(id => S.servico(id) || !S.servicos.length);
+        if (st.sel.length) {
+          st.prof = e.profissional || ""; st.data = e.data; st.passo = 3;
+          await carregaSlots();
+          if (st.slots.some(s => s.hora === e.hora)) { st.hora = e.hora; st.daEspera = e.id; st.passo = 4; }
+          else toast("Esse horário já foi preenchido. Veja os outros livres do dia.", "erro");
+        }
+      } else if (st.vaga) toast("Esse aviso de vaga não vale mais.");
     }
     desenha();
   })();

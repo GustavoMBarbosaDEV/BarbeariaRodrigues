@@ -4,7 +4,7 @@ import { S } from "../estado.js";
 import { esc, icone, tempoAtras, vazio, toast } from "../util.js";
 import { titulo } from "../ui.js";
 
-const ICONE = { aviso: "megafone", lembrete: "relogio", aniversario: "bolo", agenda: "calendario", pedido: "sacola", estoque: "caixa" };
+const ICONE = { aviso: "megafone", lembrete: "relogio", aniversario: "bolo", agenda: "calendario", pedido: "sacola", estoque: "caixa", vaga: "relogio", cancelado: "alerta", relatorio: "grafico", fidelidade: "presente" };
 
 export function tela(el) {
   let primeiraVez = true;

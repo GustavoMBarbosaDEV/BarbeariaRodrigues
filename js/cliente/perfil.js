@@ -35,7 +35,7 @@ export function tela(el, rota) {
     const p = S.perfil;
     if (!p || !p.cpf) return `<div class="carregando"><span></span></div>`;
     const notif = N.ligadas();
-    const tema = ls.get("br.tema", "escuro");
+    const tema = ls.get("bc.tema", "escuro");
     return `
       <div class="lista">
         <div class="config-item"><div class="meio"><small>CPF</small><strong>${esc(cpfFormata(p.cpf))}</strong></div></div>
@@ -46,7 +46,7 @@ export function tela(el, rota) {
       </div>
       <section class="secao"><div class="secao-topo"><h2>Preferências</h2></div>
       <div class="lista">
-        <div class="config-item"><div class="meio"><strong>Notificações no aparelho</strong><small>${N.suportado() ? "Lembrete do horário, confirmação e promoções" : "Este navegador não permite notificações"}</small></div>
+        <div class="config-item"><div class="meio"><strong>Notificações no aparelho</strong><small>${N.suportado() ? "Lembrete do horário, vaga na lista de espera, confirmação e promoções. No iPhone, adicione o app à Tela de Início para receber." : "Este navegador não permite notificações"}</small></div>
           <label class="interruptor"><input type="checkbox" id="notif" ${notif ? "checked" : ""} ${N.suportado() ? "" : "disabled"} aria-label="Notificações no aparelho"><i></i></label></div>
         <div class="config-item"><div class="meio"><strong>Tema</strong></div>
           <div class="seg">${[["escuro", "Escuro"], ["claro", "Claro"], ["auto", "Automático"]].map(([v, t]) => `<button data-tema="${v}" class="${tema === v ? "ativo" : ""}">${t}</button>`).join("")}</div></div>
@@ -65,7 +65,7 @@ export function tela(el, rota) {
     const p = S.perfil || {};
     const u = D.usuario;
     const nome = p.nome || u.nome || "Seu perfil";
-    el.innerHTML = `<div class="perfil-topo">${avatar(nome, u.foto, "g")}<div><h1>${esc(nome)}</h1><p class="muted pequeno">${esc(u.email || "")}${D.ehDono ? " · dono" : ""}</p></div></div>` + (editando ? form() : resumo());
+    el.innerHTML = `<div class="perfil-topo">${avatar(nome, u.foto, "g")}<div><h1>${esc(nome)}</h1><p class="muted pequeno">${esc(u.email || "")}${D.ehDono ? " · dono" : D.ehEquipe ? " · barbeiro" : ""}</p></div></div>` + (editando ? form() : resumo());
     liga();
   }
 
@@ -121,13 +121,16 @@ export function tela(el, rota) {
   }
 
   async function apagar() {
-    if (!await confirma("Apagar seu cadastro?", "Seus dados pessoais (nome, CPF, nascimento e telefone) serão apagados. O histórico de atendimentos fica com a barbearia por questões fiscais, sem o seu CPF. Para usar o app de novo, basta se cadastrar.", "Apagar meus dados", true)) return;
+    if (!await confirma("Apagar seu cadastro?", "Seus dados pessoais (nome, CPF, nascimento e telefone), a sua conta de acesso, seus avisos e listas de espera serão apagados. O histórico de atendimentos fica com a barbearia por questões fiscais, sem o seu CPF. Para usar o app de novo, basta se cadastrar.", "Apagar meus dados", true)) return;
     try {
-      const ops = [{ tipo: "apagar", c: "clientes", id: D.usuario.uid }];
+      const uid = D.usuario.uid;
+      const ops = [{ tipo: "apagar", c: "clientes", id: uid }, { tipo: "apagar", c: "push", id: uid }];
       if (S.perfil && S.perfil.cpf) ops.push({ tipo: "apagar", c: "cpfs", id: S.perfil.cpf });
-      await D.lote(ops);
+      for (const e of await D.listar("espera", [["uid", "==", uid]]).catch(() => [])) ops.push({ tipo: "apagar", c: "espera", id: e.id });
+      for (const n of await D.listar(`notificacoes/${uid}/itens`).catch(() => [])) ops.push({ tipo: "apagar", c: `notificacoes/${uid}/itens`, id: n.id });
+      await D.lote(ops.slice(0, 450));
       toast("Cadastro apagado.");
-      D.sair();
+      await D.apagarConta();
     } catch (e) { toast(traduzErro(e), "erro"); }
   }
 
